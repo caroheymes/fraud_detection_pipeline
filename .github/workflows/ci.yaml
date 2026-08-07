@@ -30,7 +30,7 @@ jobs:
 
       - name: Run Ruff Linter
         run: |
-          uv ruff check .
+          uv run ruff check .
 
       - name: Run Unit & Integration Tests
         env:
