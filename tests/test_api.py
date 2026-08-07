@@ -9,10 +9,11 @@ import numpy as np
 # Ajouter la racine du projet au path pour éviter les erreurs d'import en CI/CD
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# 1. Mock de MLflow et de Redis avant d'importer l'API pour désactiver les connexions réseau
+# 1. Mock de MLflow, de Redis et de SHAP avant d'importer l'API pour désactiver les connexions réseau
 sys.modules['mlflow'] = MagicMock()
 sys.modules['mlflow.sklearn'] = MagicMock()
 sys.modules['redis'] = MagicMock()
+sys.modules['shap'] = MagicMock()
 
 # Création d'un faux modèle pour simuler l'inférence XGBoost
 class DummyXGBoostModel:
