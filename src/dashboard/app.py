@@ -222,8 +222,8 @@ if not runs_df.empty:
     for _, r in runs_df.iterrows():
         r_id = r.get("run_id")
         run_name = r.get("Model Run", "")
-        # Identification par run_id (MLflow) ou par nom de fallback
-        if (champion_run_id and r_id == champion_run_id) or (r_id == "dba1e5b2807b4785a89dc0d23a247c17"):
+        # Identification par run_id (MLflow) uniquement
+        if champion_run_id and r_id == champion_run_id:
             status_list.append("🏆 Champion Actif")
         elif local_backup_loaded and "NVIDIA_GraphSAGE_XGBoost" in run_name:
             status_list.append("🏆 Champion Actif")
