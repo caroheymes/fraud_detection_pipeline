@@ -1,0 +1,39 @@
+name: CI Code Quality & Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  ci-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Lint & Test dependencies
+        run: |
+          uv pip install --system fastapi uvicorn pydantic httpx pytest pandas "numpy<2.0.0" scikit-learn xgboost skrub ruff
+
+      - name: Run Ruff Linter
+        run: |
+          uv ruff check .
+
+      - name: Run Unit & Integration Tests
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest tests/test_api.py
