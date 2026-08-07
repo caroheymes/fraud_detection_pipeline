@@ -1,9 +1,13 @@
 # tests/test_api.py
 import json
+import os
 import sys
 from unittest.mock import MagicMock
 
 import numpy as np
+
+# Ajouter la racine du projet au path pour éviter les erreurs d'import en CI/CD
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # 1. Mock de MLflow et de Redis avant d'importer l'API pour désactiver les connexions réseau
 sys.modules['mlflow'] = MagicMock()
