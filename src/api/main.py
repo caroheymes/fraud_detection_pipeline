@@ -12,7 +12,9 @@
 import json
 import os
 import time
+from datetime import datetime
 
+import httpx
 import mlflow
 import mlflow.sklearn
 import numpy as np
@@ -224,6 +226,39 @@ def save_predictions_to_db(
         )
     except Exception as e:
         print(f"[Postgres MLOps] Erreur d'écriture dans la base : {e}")
+
+
+# --- 5.5. ENVOI DE WEBHOOK AU MARCHAND EN CAS DE FRAUDE (ASYNCHRONE) ---
+def send_fraud_webhook(
+    transaction_data: dict,
+    prediction: int,
+    probability: float,
+    shap_values: dict
+):
+    webhook_url = os.getenv("MERCHANT_WEBHOOK_URL", "http://localhost:8000/mock-merchant-webhook")
+    
+    payload = {
+        "event": "transaction.suspecte",
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "data": {
+            "transaction_id": transaction_data.get("trans_num"),
+            "amount": float(transaction_data.get("amt", 0.0)),
+            "category": transaction_data.get("category"),
+            "merchant": transaction_data.get("merchant"),
+            "prediction": int(prediction),
+            "prediction_proba": float(probability),
+            "explications_shap": shap_values
+        }
+    }
+    
+    try:
+        response = httpx.post(webhook_url, json=payload, timeout=5.0)
+        if response.status_code in [200, 201, 202]:
+            print(f"[Webhook MLOps] Notification envoyée avec succès au marchand pour la transaction {transaction_data.get('trans_num')}.")
+        else:
+            print(f"[Webhook MLOps] Échec de l'envoi du webhook (code {response.status_code}).")
+    except Exception as e:
+        print(f"[Webhook MLOps] Erreur lors de l'envoi du webhook vers {webhook_url} : {e}")
 
 
 # --- 6. INITIALISATION AU DÉMARRAGE ---
@@ -515,6 +550,17 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
         shap_values_list,
     )
 
+    # 6.5. ENVOI DES WEBHOOKS POUR LES TRANSACTIONS FRAUDULEUSES
+    for i, t in enumerate(batch.transactions):
+        if predictions[i] == 1:
+            background_tasks.add_task(
+                send_fraud_webhook,
+                transactions_list[i],
+                predictions[i],
+                probabilities[i],
+                shap_values_list[i],
+            )
+
     # 7. Préparation de la réponse de l'API
     results = []
     for i, t in enumerate(batch.transactions):
@@ -530,3 +576,20 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
         )
 
     return {"status": "success", "predictions": results}
+
+
+# --- 8. ENDPOINT DE SIMULATION DE RÉCEPTEUR WEBHOOK MARCHAND ---
+@app.post("/mock-merchant-webhook")
+def mock_merchant_webhook(payload: dict):
+    global redis_client
+    print(f"[Mock Merchant Server] Webhook reçu pour la transaction {payload['data']['transaction_id']}")
+    
+    if redis_client is not None:
+        try:
+            # Enregistrement des alertes reçues dans Redis (historique des 10 dernières alertes)
+            redis_client.lpush("merchant_webhook_alerts", json.dumps(payload))
+            redis_client.ltrim("merchant_webhook_alerts", 0, 9)
+        except Exception as redis_err:
+            print(f"[Mock Merchant Server] Échec de l'écriture dans Redis : {redis_err}")
+            
+    return {"status": "success", "message": "Webhook reçu et stocké dans Redis."}

@@ -1,9 +1,9 @@
 # tests/test_api.py
-import sys
 import json
-import numpy as np
-import pandas as pd
+import sys
 from unittest.mock import MagicMock
+
+import numpy as np
 
 # 1. Mock de MLflow et de Redis avant d'importer l'API pour désactiver les connexions réseau
 sys.modules['mlflow'] = MagicMock()
@@ -30,8 +30,9 @@ dummy_pipeline.predict_proba = DummyXGBoostModel().predict_proba
 
 # Importation de l'API et de ses composants
 from fastapi.testclient import TestClient
-from src.api.main import app, haversine_vectorized
+
 import src.api.main as api_module
+from src.api.main import app, haversine_vectorized
 
 # Configuration des variables globales de l'API pour les tests (injection de mocks)
 api_module.model_pipeline = dummy_pipeline

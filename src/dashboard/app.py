@@ -69,6 +69,55 @@ except Exception as re_err:
     st.sidebar.error(f"Redis non disponible : {re_err}")
 
 st.sidebar.markdown("---")
+st.sidebar.subheader("🔔 Webhooks Marchand (Live)")
+try:
+    # Récupération des alertes depuis la liste Redis
+    alerts = r.lrange("merchant_webhook_alerts", 0, -1)
+    if alerts:
+        for alert_raw in alerts:
+            alert = json.loads(alert_raw)
+            data = alert["data"]
+            explications = data.get("explications_shap", {})
+            principal_facteur = "N/A"
+            if explications:
+                # Calcul du facteur SHAP le plus élevé en valeur absolue
+                numeric_explications = {}
+                for k, v in explications.items():
+                    try:
+                        if isinstance(v, (int, float)):
+                            numeric_explications[k] = abs(float(v))
+                        else:
+                            # Extraire les caractères numériques si c'est une chaîne
+                            cleaned_val = "".join([c for c in str(v) if c in "0123456789.-+"])
+                            numeric_explications[k] = abs(float(cleaned_val))
+                    except Exception:
+                        pass
+                if numeric_explications:
+                    max_key = max(numeric_explications, key=numeric_explications.get)
+                    mapping_noms = {
+                        "amt": "Montant de l'achat (amt)",
+                        "distance_achat": "Distance d'achat (distance)",
+                        "age": "Âge de l'acheteur (age)",
+                        "city_pop": "Population de la ville (city_pop)",
+                        "hour_sin": "Heure de transaction (heure)",
+                        "hour_cos": "Heure de transaction (heure)",
+                    }
+                    principal_facteur = mapping_noms.get(max_key, max_key)
+            
+            st.sidebar.error(
+                f"⚠️ **Alerte Fraude !**  \n"
+                f"ID : `{data['transaction_id'][:8]}...`  \n"
+                f"Marchand : *{data['merchant']}*  \n"
+                f"Montant : **{data['amount']} €**  \n"
+                f"Score Risque : `{data['prediction_proba']:.2%}`  \n"
+                f"Facteur : **{principal_facteur}**"
+            )
+    else:
+        st.sidebar.info("En attente de transactions suspectes...")
+except Exception as e:
+    st.sidebar.warning(f"Alertes Live non disponibles : {e}")
+
+st.sidebar.markdown("---")
 st.sidebar.subheader("📈 Statut Evidently AI")
 st.sidebar.success("✅ Modèle stable (Aucun drift global)")
 st.sidebar.markdown("**Dernier check :** Aujourd'hui à 22:00")

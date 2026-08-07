@@ -13,4 +13,5 @@ ignore = [
     "PIE",   # Miscellaneous lints (startswith tuple, etc.)
     "SIM",   # Simplicity checks (use enumerate, etc.)
     "TRY",   # Exception raising best practices (TRY002, etc.)
+    "EXE",   # Executable shebang checks (EXE002, etc.)
 ]
