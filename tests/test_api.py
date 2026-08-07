@@ -14,6 +14,7 @@ sys.modules['mlflow'] = MagicMock()
 sys.modules['mlflow.sklearn'] = MagicMock()
 sys.modules['redis'] = MagicMock()
 sys.modules['shap'] = MagicMock()
+sys.modules['sqlalchemy'] = MagicMock()
 
 # Création d'un faux modèle pour simuler l'inférence XGBoost
 class DummyXGBoostModel:
