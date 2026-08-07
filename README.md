@@ -33,6 +33,9 @@ Ce dépôt contient l'architecture logicielle complète pour le pipeline temps r
 ---
 
 ## 🏗️ Architecture du pipeline
+shéma simplifié : ingestion, inférence, réentrainement
+
+![Pipeline haut niveau](./pipeline_haut_niveau.png)
 
 Schéma d'architecture complet du pipeline en temps réel, incluant le Fast-Path avec Redis Cache, le calcul d'explicabilité Shapash, et la boucle de drift/réentraînement :
 

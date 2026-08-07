@@ -229,8 +229,8 @@ with DAG(
     dag_id="batch_prediction_pipeline",
     default_args=default_args,
     description="Inférence periodique sur les données de fraude",
-    schedule=None,  # Executes the entire pipeline sequentially via self-triggering
-    start_date=datetime(2026, 1, 1),
+    schedule=timedelta(minutes=1), # None,  
+    start_date=datetime(2019, 1, 1),
     catchup=False,
     max_active_runs=1,  # IMPORTANT : Traite les fichiers un par un
     tags=["fraud-detection", "pipeline", "ingest", "predict"],
