@@ -1,5 +1,18 @@
 # Fraud detection MLOps pipeline
 
+### Technical Stack
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.24%2B-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![MLflow](https://img.shields.io/badge/MLflow-2.4%2B-0194E2?style=for-the-badge&logo=mlflow&logoColor=white)](https://mlflow.org/)
+[![Ray](https://img.shields.io/badge/Ray-2.35%2B-028CF0?style=for-the-badge&logo=ray&logoColor=white)](https://www.ray.io/)
+[![Apache Airflow](https://img.shields.io/badge/Apache_Airflow-2.9%2B-017AEC?style=for-the-badge&logo=apache_airflow&logoColor=white)](https://airflow.apache.org/)
+[![dbt](https://img.shields.io/badge/dbt-1.8%2B-FF694B?style=for-the-badge&logo=dbt&logoColor=white)](https://www.getdbt.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15%2B-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Redis](https://img.shields.io/badge/Redis-5.0%2B-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+[![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=for-the-badge&logo=github-actions&logoColor=white)](https://github.com/features/actions)
+
 Ce dépôt contient l'architecture logicielle complète pour le pipeline temps réel de détection de fraude et la boucle automatisée de drift/réentraînement.
 
 ---
