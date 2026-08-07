@@ -1,0 +1,44 @@
+{
+    "current_date": "2020-07-28",
+    "sample_size": 3969,
+    "drift_detected": false,
+    "mean_drift_ratio": 0.0,
+    "details": {
+        "amt": {
+            "drift_detected": false,
+            "metric_value": 0.023215868622958047,
+            "threshold": 0.1,
+            "method": "Wasserstein distance (normed)"
+        },
+        "hour_sin": {
+            "drift_detected": false,
+            "metric_value": 0.028319625697518905,
+            "threshold": 0.1,
+            "method": "Wasserstein distance (normed)"
+        },
+        "hour_cos": {
+            "drift_detected": false,
+            "metric_value": 0.017492173669539597,
+            "threshold": 0.1,
+            "method": "Wasserstein distance (normed)"
+        },
+        "distance_achat": {
+            "drift_detected": false,
+            "metric_value": 0.025377868502733658,
+            "threshold": 0.1,
+            "method": "Wasserstein distance (normed)"
+        },
+        "is_fraud": {
+            "drift_detected": false,
+            "metric_value": 0.015408316932527748,
+            "threshold": 0.1,
+            "method": "Jensen-Shannon distance"
+        },
+        "gender": {
+            "drift_detected": false,
+            "metric_value": 0.009767691920612727,
+            "threshold": 0.1,
+            "method": "Jensen-Shannon distance"
+        }
+    }
+}

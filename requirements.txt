@@ -1,0 +1,28 @@
+fastapi>=0.100.0
+uvicorn>=0.22.0
+pydantic==2.13.4
+httpx>=0.24.0
+pytest>=7.3.0
+pandas>=2.0.0
+numpy>=1.26.0,<2.0.0
+psycopg2-binary>=2.9.6
+dbt-core>=1.8.0
+dbt-postgres>=1.8.0
+ruff 
+nbqa 
+
+# UI
+streamlit>=1.24.0
+plotly==5.24.1
+
+# Ingestion et stockage
+requests
+sqlalchemy
+pytz
+grequests
+
+# feature store
+feast==0.65.0
+redis>=5.0.0
+psycopg[binary]>=3.1.0
+psycopg-pool>=3.2.0

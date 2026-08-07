@@ -1,0 +1,3884 @@
+<div id="skore-summary-862f4336-wrapper">
+    <template id="skore-summary-862f4336-template">
+        <style>
+/* Light theme (default) */
+.container,
+:host {
+    --color-blue: #3043f0;
+    --color-orange: #f97316;
+    --color-text: #000;
+    --color-background: #fff;
+    --color-orange-hover: rgba(249, 115, 22, 0.1);
+    --color-blue-hover: rgba(48, 67, 240, 0.1);
+    --color-row-stripe: rgba(0, 0, 0, 0.06);
+}
+
+/* Dark theme */
+.container.dark-theme,
+.container[data-theme="dark"],
+:host(.dark-theme),
+:host([data-theme="dark"]) {
+    --color-blue: #79c0ff;
+    --color-orange: #f8ab53;
+    --color-text: #fff;
+    --color-background: #0c1116;
+    --color-orange-hover: rgba(248, 171, 83, 0.2);
+    --color-blue-hover: rgba(121, 192, 255, 0.2);
+    --color-row-stripe: rgba(255, 255, 255, 0.08);
+}
+
+.container {
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 10px;
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+    background-color: var(--color-background);
+    margin: 10px 0;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 800px;
+    min-width: 0;
+}
+
+.title {
+    font-weight: bold;
+    color: var(--color-text);
+    margin-bottom: 10px;
+    font-size: 14px;
+    text-align: center;
+}
+.tree {
+    font-family: monospace;
+    margin-left: 0;
+}
+
+.node {
+    margin: 0;
+    padding: 0;
+}
+
+.label {
+    color: var(--color-text);
+    font-weight: bold;
+}
+
+.root-content {
+    margin-left: 16px;
+    position: relative;
+}
+
+.root-content > .node,
+.root-content > .method {
+    border-left: 2px solid var(--color-text);
+    padding-left: 16px;
+    position: relative;
+    margin-left: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+.root-content > .node:not(:first-child),
+.root-content > .method:not(:first-child) {
+    border-top: 2px solid transparent;
+    margin-top: -2px;
+    padding-top: 2px;
+}
+
+.root-content > .node:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.root-content > .node:last-child::after,
+.root-content > .method:last-child::after {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: 0;
+    height: calc(1.5em / 2); /* Half of line-height */
+    width: 2px;
+    background-color: var(--color-text);
+}
+
+.root-content > .node:last-child,
+.root-content > .method:last-child {
+    border-left-color: transparent;
+}
+
+.root-content > .node::before,
+.root-content > .method::before {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: calc(1.5em / 2); /* Half of line-height */
+    width: 12px;
+    height: 2px;
+    background-color: var(--color-text);
+}
+
+.toggle {
+    display: none;
+}
+
+.branch-label {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    color: var(--color-blue);
+    font-weight: bold;
+    position: relative;
+    margin: 0;
+    padding: 0;
+    line-height: 1.5em;
+}
+
+.branch-label:has(.name):hover {
+    background-color: var(--color-orange-hover);
+}
+
+.branch-label:has(.section-name):hover {
+    background-color: var(--color-blue-hover);
+}
+
+.name {
+    color: var(--color-orange);
+}
+
+.section-name {
+    color: var(--color-blue);
+}
+
+.branch-content {
+    margin-left: 16px;
+    position: relative;
+    padding-left: 0;
+    display: none;
+}
+
+.branch-label:has(.toggle:checked) + .branch-content {
+    display: block;
+}
+
+/* Vertical lines for items inside branch content */
+.branch-content > .node,
+.branch-content > .method {
+    border-left: 2px solid var(--color-text);
+    padding-left: 16px;
+    position: relative;
+    margin-left: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+
+/* Extend border to connect with previous element */
+.branch-content > .node:not(:first-child),
+.branch-content > .method:not(:first-child) {
+    border-top: 2px solid transparent;
+    margin-top: -2px;
+    padding-top: 2px;
+}
+
+/* Hide vertical line on last item below middle */
+.branch-content > .node:last-child,
+.branch-content > .method:last-child {
+    border-left-color: transparent;
+}
+
+/* Add half-height vertical line for last items */
+.branch-content > .node:last-child::after,
+.branch-content > .method:last-child::after {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: 0;
+    height: calc(1.5em / 2); /* Half of line-height */
+    width: 2px;
+    background-color: var(--color-text);
+}
+
+.branch-content > .node::before,
+.branch-content > .method::before {
+    content: '';
+    position: absolute;
+    left: -2px;
+    top: calc(1.5em / 2); /* Half of line-height */
+    width: 12px;
+    height: 2px;
+    background-color: var(--color-text);
+}
+
+.method {
+    color: var(--color-text);
+    margin: 0;
+    padding: 0;
+    line-height: 1.5em;
+}
+
+.method-name {
+    color: var(--color-text);
+}
+
+
+.method-tooltip {
+    position: relative;
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 0.3em;
+    cursor: help;
+    color: inherit;
+    text-decoration-color: inherit;
+}
+
+.method-tooltip:hover {
+    color: inherit;
+}
+
+.method-tooltip:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+.tooltip-text {
+    visibility: hidden;
+    opacity: 0;
+    background-color: var(--color-background);
+    color: var(--color-text);
+    text-align: left;
+    border-radius: 4px;
+    border: 1px solid var(--color-orange);
+    padding: 8px 10px;
+    position: absolute;
+    z-index: 1000;
+    top: 50%;
+    left: 100%;
+    transform: translateY(-50%);
+    margin-left: 8px;
+    white-space: normal;
+    width: 250px;
+    font-size: 12px;
+    line-height: 1.4;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-text) 14%, transparent);
+    transition: opacity 0.2s, visibility 0.2s;
+}
+
+.arrow {
+    vertical-align: text-top;
+}
+
+.tooltip-text::before {
+    content: "";
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 5px solid transparent;
+    border-right-color: var(--color-orange);
+}
+
+.legend {
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 1px solid var(--color-text);
+    font-size: 12px;
+    color: var(--color-text);
+}
+.report-hint-note {
+    margin: 0.85em 0 0;
+    padding: 0.65em 0.5em 0;
+    border-top: 1px solid color-mix(in srgb, var(--color-orange) 45%, transparent);
+    color: var(--color-text);
+    font-size: 11px;
+    font-style: italic;
+    font-weight: 400;
+    line-height: 1.45;
+    opacity: 0.88;
+}
+
+.report-hint-note::before {
+    content: "Note";
+    display: block;
+    font-style: normal;
+    font-weight: 600;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-orange);
+    opacity: 0.9;
+    margin-bottom: 0.35em;
+}
+
+.report-hint-note-line {
+    display: block;
+}
+
+.report-hint-note-line + .report-hint-note-line {
+    margin-top: 0.35em;
+}
+
+.report-hint-note-link {
+    color: var(--color-blue);
+    font-style: normal;
+    text-decoration: underline;
+    text-decoration-style: dashed;
+    text-underline-offset: 0.2em;
+    cursor: help;
+}
+
+.report-hint-note-link:hover {
+    background-color: var(--color-blue-hover);
+    border-radius: 2px;
+}
+
+.report-tabset {
+    position: relative;
+    color: var(--color-text);
+}
+
+.report-tab-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.report-tablist-row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    width: 100%;
+    box-sizing: border-box;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-text) 25%, transparent);
+}
+
+.report-tablist {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.15em;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 0;
+    padding: 0;
+    border-bottom: none;
+}
+
+.report-tablist-help {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    align-self: center;
+    padding: 0 0.15em 0 0.65em;
+    margin: 0.15em 0;
+    border-left: 1px solid color-mix(in srgb, var(--color-text) 22%, transparent);
+}
+
+.report-tab-item {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.report-tab-help {
+    position: relative;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
+    width: 1.35em;
+    height: 1.35em;
+    min-width: 1.35em;
+    min-height: 1.35em;
+    border: 1px solid color-mix(in srgb, var(--color-blue) 50%, transparent);
+    border-radius: 50%;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--color-blue);
+    background-color: var(--color-background);
+    cursor: help;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.report-tab-help:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.report-tab-help:focus-visible {
+    outline: 2px solid var(--color-blue);
+    outline-offset: 2px;
+}
+
+/* Single global "?": show only the tooltip for the checked tab */
+.report-tab-help-global:hover .report-tab-help-tip,
+.report-tab-help-global:focus-within .report-tab-help-tip {
+    visibility: hidden;
+    opacity: 0;
+}
+
+.report-tabset:has(> .report-tab-input:nth-child(1):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:hover .report-tab-help-tip-0,
+.report-tabset:has(> .report-tab-input:nth-child(1):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:focus-within .report-tab-help-tip-0,
+.report-tabset:has(> .report-tab-input:nth-child(2):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:hover .report-tab-help-tip-1,
+.report-tabset:has(> .report-tab-input:nth-child(2):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:focus-within .report-tab-help-tip-1,
+.report-tabset:has(> .report-tab-input:nth-child(3):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:hover .report-tab-help-tip-2,
+.report-tabset:has(> .report-tab-input:nth-child(3):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:focus-within .report-tab-help-tip-2,
+.report-tabset:has(> .report-tab-input:nth-child(4):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:hover .report-tab-help-tip-3,
+.report-tabset:has(> .report-tab-input:nth-child(4):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:focus-within .report-tab-help-tip-3,
+.report-tabset:has(> .report-tab-input:nth-child(5):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:hover .report-tab-help-tip-4,
+.report-tabset:has(> .report-tab-input:nth-child(5):checked) > .report-tablist-row > .report-tablist-help > .report-tab-help-global:focus-within .report-tab-help-tip-4 {
+    visibility: visible;
+    opacity: 1;
+}
+
+.report-tab-help-global .report-tab-help-tip {
+    font-style: italic;
+    font-weight: 400;
+    opacity: 0.95;
+    max-width: min(280px, 90vw);
+    width: max-content;
+    top: 50%;
+    left: auto;
+    right: 100%;
+    margin-left: 0;
+    margin-right: 8px;
+    transform: translateY(-50%);
+}
+
+.report-tab-help-global .report-tab-help-tip::before {
+    right: auto;
+    left: 100%;
+    border-right-color: transparent;
+    border-left-color: var(--color-orange);
+}
+
+.report-tab-label {
+    cursor: pointer;
+    user-select: none;
+    color: var(--color-blue);
+    font-weight: bold;
+    line-height: 1.5em;
+    padding: 0.35em 0.65em;
+    margin: 0;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    flex-shrink: 0;
+    border-radius: 4px 4px 0 0;
+}
+
+.report-tab-label:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.report-tabset:has(> .report-tab-input:nth-child(1):checked) > .report-tablist-row > .report-tablist > .report-tab-item:nth-child(1) > .report-tab-label,
+.report-tabset:has(> .report-tab-input:nth-child(2):checked) > .report-tablist-row > .report-tablist > .report-tab-item:nth-child(2) > .report-tab-label,
+.report-tabset:has(> .report-tab-input:nth-child(3):checked) > .report-tablist-row > .report-tablist > .report-tab-item:nth-child(3) > .report-tab-label,
+.report-tabset:has(> .report-tab-input:nth-child(4):checked) > .report-tablist-row > .report-tablist > .report-tab-item:nth-child(4) > .report-tab-label,
+.report-tabset:has(> .report-tab-input:nth-child(5):checked) > .report-tablist-row > .report-tablist > .report-tab-item:nth-child(5) > .report-tab-label {
+    border-bottom-color: var(--color-blue);
+}
+
+.report-tab-panels {
+    margin-top: 0.35em;
+}
+
+.report-tab-panels .report-tab-panel {
+    display: none;
+}
+
+.report-tabset:has(> .report-tab-input:nth-child(1):checked) > .report-tab-panels > .report-tab-panel:nth-child(1),
+.report-tabset:has(> .report-tab-input:nth-child(2):checked) > .report-tab-panels > .report-tab-panel:nth-child(2),
+.report-tabset:has(> .report-tab-input:nth-child(3):checked) > .report-tab-panels > .report-tab-panel:nth-child(3),
+.report-tabset:has(> .report-tab-input:nth-child(4):checked) > .report-tab-panels > .report-tab-panel:nth-child(4),
+.report-tabset:has(> .report-tab-input:nth-child(5):checked) > .report-tab-panels > .report-tab-panel:nth-child(5) {
+    display: block;
+}
+
+.report-tab-panel .report-section {
+    overflow-x: auto;
+    max-width: 100%;
+}
+
+.report-disclosure-title {
+    position: relative;
+    font-weight: inherit;
+    color: inherit;
+}
+
+.report-disclosure-title.method-tooltip {
+    cursor: pointer;
+}
+
+.report-disclosure-title.method-tooltip:hover {
+    background-color: var(--color-blue-hover);
+    border-radius: 2px;
+}
+
+.report-disclosure-title:focus-visible {
+    outline: 2px solid var(--color-blue);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+.report-disclosure-title.method-tooltip:focus-within .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+.report-disclosure-title .tooltip-text {
+    width: max-content;
+    max-width: calc(100vw - 2rem);
+    white-space: nowrap;
+    overflow-x: auto;
+    box-sizing: border-box;
+    font-weight: 400;
+    background-color: var(--color-background);
+    color: var(--color-text);
+    border: 1px solid var(--color-orange);
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+
+.report-disclosure-title .tooltip-text::before {
+    border-right-color: var(--color-orange);
+}
+
+.report-tooltip-accessor-link {
+    color: var(--color-orange);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 0.15em;
+}
+
+.report-tooltip-accessor-link:hover {
+    text-decoration-thickness: 2px;
+}
+
+.report-metrics table.dataframe {
+    border: none;
+    border-collapse: collapse;
+    border-spacing: 0;
+    color: var(--color-text);
+    font-size: 12px;
+    font-family: sans-serif;
+    margin: 0.5em 0;
+    min-width: min(100%, 640px);
+}
+
+.report-metrics table.dataframe thead {
+    border-bottom: 1px solid var(--color-text);
+}
+
+.report-metrics table.dataframe th,
+.report-metrics table.dataframe td {
+    text-align: right;
+    padding: 0.35em 0.75em;
+    border: none;
+    vertical-align: middle;
+}
+
+.report-metrics table.dataframe th {
+    font-weight: 600;
+    text-align: right;
+}
+
+.report-metrics table.dataframe tbody tr:nth-child(even) {
+    background-color: var(--color-row-stripe);
+}
+
+.report-metrics table.dataframe tbody tr:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.report-checks-summary {
+    padding-top: 0.5em;
+}
+
+.report-estimator {
+    padding-top: 0.5em;
+}
+
+.report-data {
+    padding-top: 0.5em;
+}
+
+.report-checks-nested {
+    margin-left: 1.5em;
+}
+
+.report-checks-summary-list {
+    margin: 0;
+    padding-left: 1.2em;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.report-checks-summary-list li + li {
+    margin-top: 0.35em;
+}
+
+.report-checks-summary-sublist {
+    margin: 0;
+    padding-left: 1.2em;
+    font-size: inherit;
+    line-height: inherit;
+}
+
+.report-checks-summary-sublist li + li {
+    margin-top: 0em;
+}
+
+.report-checks-summary-empty {
+    margin: 0;
+    font-size: 12px;
+    font-style: italic;
+    opacity: 0.85;
+}
+
+.comparison-report-select-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5em 0.75em;
+    margin: 0 0 0.65em;
+    color: var(--color-text);
+}
+
+.comparison-report-select-row label {
+    font-weight: bold;
+    color: var(--color-blue);
+}
+
+.comparison-report-select-row select {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    color: var(--color-text);
+    background-color: var(--color-background);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+    padding: 0.2em 0.45em;
+    max-width: min(100%, 28rem);
+}
+
+.summary-container {
+    max-width: 100%;
+}
+
+/* Toolbar row holding the search bar, Filter and Group by buttons */
+.skore-summary-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5em 0.6em;
+    margin-bottom: 0.5em;
+}
+
+/* Free-text search bar */
+.skore-summary-search {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    flex: 1 1 14em;
+    min-width: 0;
+    padding: 0.25em 0.6em;
+    background-color: var(--color-background);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+}
+
+.skore-summary-search-icon {
+    flex: 0 0 auto;
+    color: var(--color-text);
+    opacity: 0.6;
+}
+
+.skore-summary-search-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background-color: transparent;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+}
+
+.skore-summary-search-input::placeholder {
+    color: var(--color-text);
+    opacity: 0.5;
+}
+
+.summary-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5em 0.75em;
+    margin-bottom: 0.65em;
+    color: var(--color-text);
+}
+
+/* Filter / Group by buttons and popovers */
+.skore-summary-filter,
+.skore-summary-groupby,
+.skore-summary-columns {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.skore-summary-filter-toggle,
+.skore-summary-groupby-toggle,
+.skore-summary-columns-toggle {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    color: var(--color-blue);
+    background-color: var(--color-background);
+    border: 1px solid var(--color-blue);
+    border-radius: 4px;
+    padding: 0.25em 0.7em;
+    cursor: pointer;
+}
+
+.skore-summary-filter-toggle:hover,
+.skore-summary-groupby-toggle:hover,
+.skore-summary-columns-toggle:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.skore-summary-columns-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 10;
+    min-width: 11em;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 0.25em;
+    background-color: var(--color-background);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+
+.skore-summary-columns-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.3em 0.5em;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.skore-summary-columns-option:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.summary-col-hidden {
+    display: none;
+}
+
+.skore-summary-filter-panel,
+.skore-summary-groupby-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 10;
+    min-width: 11em;
+    padding: 0.25em;
+    background-color: var(--color-background);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-text) 14%, transparent);
+}
+
+/* First level: one entry per filterable column */
+.skore-summary-filter-field {
+    position: relative;
+}
+
+.skore-summary-filter-field-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75em;
+    width: 100%;
+    padding: 0.3em 0.5em;
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.skore-summary-filter-field:hover .skore-summary-filter-field-toggle,
+.skore-summary-filter-field:focus-within .skore-summary-filter-field-toggle {
+    background-color: var(--color-blue-hover);
+}
+
+.skore-summary-filter-arrow::after {
+    content: "\25B8";
+    opacity: 0.7;
+}
+
+/* Second level: scrollable list of values, opening to the right on hover.
+   Anchored past the panel's right padding/border with a 4px gap (matching the
+   button-to-panel gap); a transparent bridge keeps hover continuous. */
+.skore-summary-filter-submenu {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    top: -0.25em;
+    left: calc(100% + 0.25em + 5px);
+    z-index: 11;
+    min-width: 11em;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 0.25em 0.5em;
+    background-color: var(--color-background);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+    box-shadow: 0 2px 10px color-mix(in srgb, var(--color-text) 14%, transparent);
+    /* Keep the submenu open briefly after the pointer leaves so it does not
+       close while crossing the gap to reach it (hover-intent pattern). */
+    transition: visibility 0s linear 0.25s, opacity 0.12s linear;
+}
+
+/* Transparent bridge spanning the gap; it overlaps a few px into the parent
+   button to absorb sub-pixel gaps that would otherwise drop the hover. */
+.skore-summary-filter-submenu::before {
+    content: "";
+    position: absolute;
+    top: -4px;
+    right: 100%;
+    width: calc(0.25em + 11px);
+    height: calc(100% + 8px);
+}
+
+.skore-summary-filter-field:hover .skore-summary-filter-submenu,
+.skore-summary-filter-field:focus-within .skore-summary-filter-submenu {
+    visibility: visible;
+    opacity: 1;
+    transition-delay: 0s;
+}
+
+.skore-summary-filter-option {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.15em 0;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+/* Date range submenu (start/end native datetime pickers) */
+.skore-summary-date-submenu {
+    min-width: 13em;
+}
+
+.skore-summary-date-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+    padding: 0.2em 0;
+    color: var(--color-text);
+}
+
+.skore-summary-date-field input {
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--color-text);
+    background-color: var(--color-background);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+    padding: 0.15em 0.3em;
+}
+
+.skore-summary-date-clear {
+    margin-top: 0.35em;
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--color-blue);
+    background-color: transparent;
+    border: 1px solid var(--color-blue);
+    border-radius: 4px;
+    padding: 0.1em 0.5em;
+    cursor: pointer;
+}
+
+.skore-summary-date-clear:hover {
+    background-color: var(--color-blue-hover);
+}
+
+/* Group-by options (direct entries in the Group by panel) */
+.skore-summary-group-option {
+    display: block;
+    width: 100%;
+    padding: 0.3em 0.5em;
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.skore-summary-group-option:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.skore-summary-group-option--active {
+    color: var(--color-blue);
+    font-weight: 600;
+}
+
+.skore-summary-group-none {
+    margin-top: 0.15em;
+    border-top: 1px solid var(--color-orange);
+}
+
+.skore-summary-group-custom {
+    padding: 0.25em 0;
+    border-top: 1px solid var(--color-orange);
+    margin-top: 0.15em;
+}
+
+.skore-summary-group-custom-title {
+    display: block;
+    color: var(--color-text);
+    margin-bottom: 0.25em;
+}
+
+.skore-summary-group-custom-row {
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    margin-bottom: 0.3em;
+}
+
+.skore-summary-group-n {
+    width: 3.5em;
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--color-text);
+    background-color: var(--color-background);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+    padding: 0.1em 0.25em;
+}
+
+.skore-summary-group-unit {
+    font-family: inherit;
+    font-size: inherit;
+    color: var(--color-text);
+    background-color: var(--color-background);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+    padding: 0.1em 0.25em;
+}
+
+.skore-summary-group-custom-apply {
+    color: var(--color-blue);
+    border: 1px solid var(--color-blue);
+    text-align: center;
+}
+
+/* Group header rows that separate grouped sets of rows */
+.summary-table tbody tr.summary-group-header td {
+    position: sticky;
+    left: 0;
+    padding: 0.4em 0.75em;
+    font-weight: 700;
+    color: var(--color-blue);
+    background-color: var(--color-row-stripe);
+    border-top: 2px solid var(--color-orange);
+}
+
+.summary-table tbody tr.summary-group-header:hover td {
+    background-color: var(--color-row-stripe);
+}
+
+/* Query string bar with embedded copy icon */
+.skore-summary-query-bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1 1 18em;
+    min-width: 0;
+    background-color: var(--color-row-stripe);
+    border: 1px solid var(--color-orange);
+    border-radius: 4px;
+}
+
+.skore-summary-query {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding: 0.3em 0.5em;
+    color: var(--color-text);
+    font-family: monospace;
+}
+
+.skore-summary-copy {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25em 0.4em;
+    margin-right: 0.15em;
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    color: var(--color-blue);
+    cursor: pointer;
+}
+
+.skore-summary-copy:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.skore-summary-clear {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.25em 0.4em;
+    margin-right: 0.15em;
+    border: none;
+    border-radius: 4px;
+    background-color: transparent;
+    color: var(--color-blue);
+    cursor: pointer;
+}
+
+.skore-summary-clear:hover {
+    background-color: var(--color-blue-hover);
+}
+
+/* "?" help button, reusing .report-tab-help, with a left-opening tooltip */
+.skore-summary-help {
+    flex: 0 0 auto;
+}
+
+.skore-summary-help:hover .tooltip-text,
+.skore-summary-help:focus-within .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+.skore-summary-help .skore-summary-help-tip {
+    top: 50%;
+    left: auto;
+    right: 100%;
+    margin-left: 0;
+    margin-right: 8px;
+    transform: translateY(-50%);
+}
+
+.skore-summary-help .skore-summary-help-tip::before {
+    right: auto;
+    left: 100%;
+    border-right-color: transparent;
+    border-left-color: var(--color-orange);
+}
+
+/* Scrollable table */
+.summary-table-wrap {
+    max-height: 450px;
+    overflow: auto;
+    max-width: 100%;
+}
+
+.summary-table {
+    width: 100%;
+    border: none;
+    border-collapse: collapse;
+    border-spacing: 0;
+    color: var(--color-text);
+    font-size: 12px;
+    font-family: sans-serif;
+}
+
+.summary-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background-color: var(--color-background);
+    border-bottom: 1px solid var(--color-text);
+}
+
+.summary-table th,
+.summary-table td {
+    text-align: left;
+    white-space: nowrap;
+    padding: 0.35em 0.75em;
+    border: none;
+    vertical-align: middle;
+}
+
+.summary-table th {
+    font-weight: 600;
+}
+
+.summary-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.summary-sortable:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.summary-sort-ind {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.3em;
+    vertical-align: middle;
+}
+
+.summary-sort-icon {
+    display: none;
+    line-height: 0;
+}
+
+.summary-sort-icon svg {
+    display: block;
+    width: 13px;
+    height: 13px;
+}
+
+/* Show the matching sort icon for the current header state. */
+.summary-sortable[aria-sort="none"] .summary-sort-icon--none {
+    display: inline-flex;
+    opacity: 0.4;
+}
+
+.summary-sortable[aria-sort="ascending"] .summary-sort-icon--asc,
+.summary-sortable[aria-sort="descending"] .summary-sort-icon--desc {
+    display: inline-flex;
+}
+
+.summary-table tbody tr:nth-child(even) {
+    background-color: var(--color-row-stripe);
+}
+
+.summary-table tbody tr:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.summary-table .summary-select-col {
+    text-align: center;
+    width: 1.5em;
+}
+
+/* Keep the selection column always visible while scrolling horizontally.
+   The stripe/hover theme colors are translucent, so we keep a solid
+   background underneath and layer the tint on top to stay fully opaque. */
+.summary-table td.summary-select-col {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background-color: var(--color-background);
+}
+
+.summary-table tbody tr:nth-child(even) td.summary-select-col {
+    background-image: linear-gradient(
+        var(--color-row-stripe),
+        var(--color-row-stripe)
+    );
+}
+
+.summary-table tbody tr:hover td.summary-select-col {
+    background-image: linear-gradient(
+        var(--color-blue-hover),
+        var(--color-blue-hover)
+    );
+}
+
+.summary-table thead th.summary-select-col {
+    left: 0;
+    z-index: 4;
+}
+
+/* Table / Plot view toggle (segmented control) */
+.summary-view-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    border: 1px solid var(--color-blue);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.summary-view-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    color: var(--color-blue);
+    background-color: var(--color-background);
+    border: none;
+    padding: 0.3em 0.6em;
+    cursor: pointer;
+}
+
+/* Inline icons replacing the former text labels / Font Awesome glyphs. */
+.summary-view-btn svg,
+.skore-summary-filter-toggle svg,
+.skore-summary-groupby-toggle svg,
+.skore-summary-columns-toggle svg,
+.skore-summary-copy svg,
+.skore-summary-clear svg {
+    display: block;
+    width: 15px;
+    height: 15px;
+}
+
+.skore-summary-filter-toggle,
+.skore-summary-groupby-toggle,
+.skore-summary-columns-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.summary-view-btn:hover {
+    background-color: var(--color-blue-hover);
+}
+
+.summary-view-btn--active {
+    color: var(--color-background);
+    background-color: var(--color-blue);
+}
+
+.summary-view-btn--active:hover {
+    background-color: var(--color-blue);
+}
+
+/* View visibility, driven by the container's data-view attribute. The first
+   toolbar row (view toggle, Filter, query string, help) is shared by all
+   views. The table and the parallel-coordinates plot hide the second control
+   row entirely; the trend plot keeps it but only to expose Group by (which
+   drives its polylines), hiding the table-only Columns and Search controls. */
+.summary-container[data-view="plot"] .summary-controls,
+.summary-container[data-view="plot"] .summary-table-wrap,
+.summary-container[data-view="trend"] .summary-table-wrap {
+    display: none;
+}
+
+.summary-container[data-view="trend"] .skore-summary-columns,
+.summary-container[data-view="trend"] .skore-summary-search {
+    display: none;
+}
+
+/* Show each plot only in its own view. */
+.summary-plot-wrap {
+    display: none;
+}
+
+.summary-container[data-view="plot"] .summary-plot-wrap {
+    display: block;
+}
+
+.summary-trend-wrap {
+    display: none;
+}
+
+.summary-container[data-view="trend"] .summary-trend-wrap {
+    display: block;
+}
+
+/* Parallel-coordinates plot view */
+.summary-plot-wrap {
+    max-width: 100%;
+}
+
+.skore-summary-color-metric-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    margin-bottom: 0.6em;
+    color: var(--color-text);
+}
+
+.skore-summary-color-metric,
+.skore-summary-trend-metric {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    color: var(--color-text);
+    background-color: var(--color-background);
+    border: 1px solid var(--color-blue);
+    border-radius: 4px;
+    padding: 0.2em 0.4em;
+    cursor: pointer;
+}
+
+/* The trend Y-metric selector lives next to Group by and only shows in the
+   trend view (Group by drives its polylines). */
+.skore-summary-trend-metric-field {
+    display: none;
+    align-items: center;
+    gap: 0.4em;
+    color: var(--color-text);
+}
+
+.summary-container[data-view="trend"] .skore-summary-trend-metric-field {
+    display: inline-flex;
+}
+
+.summary-plot {
+    width: 100%;
+}
+
+.summary-plot svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.summary-plot-axis-line {
+    stroke: var(--color-text);
+    stroke-opacity: 0.4;
+}
+
+.summary-plot-axis-label {
+    fill: var(--color-text);
+    font-family: sans-serif;
+    font-size: 11px;
+}
+
+.summary-plot-tick {
+    fill: var(--color-text);
+    fill-opacity: 0.6;
+    font-family: sans-serif;
+    font-size: 10px;
+}
+
+.summary-plot-line {
+    fill: none;
+    stroke-width: 1.5;
+    stroke-opacity: 0.55;
+}
+
+.summary-plot-line:hover {
+    stroke-width: 2.5;
+    stroke-opacity: 1;
+}
+
+.summary-plot-line--dim {
+    stroke-opacity: 0.08;
+}
+
+/* Invisible drag target sitting on each axis to capture range brushing */
+.summary-plot-brush-track {
+    fill: transparent;
+    cursor: ns-resize;
+    pointer-events: all;
+}
+
+/* The selected range rectangle drawn over an axis */
+.summary-plot-brush {
+    fill: var(--color-blue);
+    fill-opacity: 0.2;
+    stroke: var(--color-blue);
+    stroke-opacity: 0.6;
+    pointer-events: none;
+}
+
+.summary-plot-empty {
+    color: var(--color-text);
+    opacity: 0.7;
+}
+
+/* Trend plot view (metric over an ordinal, date-ordered x-axis) */
+.summary-trend-wrap {
+    max-width: 100%;
+}
+
+.summary-trend {
+    position: relative;
+    width: 100%;
+}
+
+.summary-trend svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+/* Immediate hover box for a marker (ID and key) */
+.summary-trend-tooltip {
+    position: absolute;
+    pointer-events: none;
+    z-index: 10;
+    padding: 0.25em 0.4em;
+    font-family: inherit;
+    font-size: 11px;
+    white-space: nowrap;
+    color: var(--color-text);
+    background-color: var(--color-background);
+    border: 1px solid var(--color-blue);
+    border-radius: 0;
+}
+
+.summary-trend-line {
+    fill: none;
+    stroke-width: 1.5;
+    stroke-opacity: 0.8;
+}
+
+.summary-trend-line--dim {
+    stroke-opacity: 0.08;
+}
+
+.summary-trend-point {
+    stroke: var(--color-background);
+    stroke-width: 1;
+    cursor: pointer;
+}
+
+.summary-trend-point--dim {
+    opacity: 0.12;
+}
+
+/* Emphasize the hovered marker (also lifts a dimmed one back to full opacity) */
+.summary-trend-point--hover {
+    opacity: 1;
+    stroke: var(--color-text);
+    stroke-width: 2;
+}
+
+.summary-trend-errorbar {
+    fill: none;
+    stroke-width: 1;
+    stroke-opacity: 0.55;
+    pointer-events: none;
+}
+
+/* Dotted guide line marking a range cursor's position */
+.summary-trend-cursor {
+    stroke: var(--color-blue);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+    stroke-opacity: 0.6;
+    pointer-events: none;
+}
+
+/* Short grip handle (the drag target) carrying a direction arrow */
+.summary-trend-grip {
+    touch-action: none;
+}
+
+.summary-trend-grip--x {
+    cursor: ew-resize;
+}
+
+.summary-trend-grip--y {
+    cursor: ns-resize;
+}
+
+.summary-trend-grip-box {
+    fill: var(--color-background);
+    stroke: var(--color-blue);
+    stroke-width: 1;
+}
+
+.summary-trend-grip-arrow {
+    fill: var(--color-blue);
+    font-family: sans-serif;
+    font-size: 11px;
+    pointer-events: none;
+    user-select: none;
+}
+
+.summary-trend-empty {
+    color: var(--color-text);
+    opacity: 0.7;
+}
+
+.summary-trend-undated-empty {
+    color: var(--color-text);
+    opacity: 0.7;
+}
+        </style>
+        <div class="container summary-container" data-view="table">
+    <header class="title">Project summary</header>
+    
+    <div class="skore-summary-toolbar">
+        <div class="summary-view-toggle" role="group" aria-label="View">
+            <button type="button" class="summary-view-btn summary-view-btn--active" data-view="table" aria-pressed="true" aria-label="Table view" title="Table view"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M11.9974 2.66797H3.9974C3.26102 2.66797 2.66406 3.26492 2.66406 4.0013V12.0013C2.66406 12.7377 3.26102 13.3346 3.9974 13.3346H11.9974C12.7338 13.3346 13.3307 12.7377 13.3307 12.0013V4.0013C13.3307 3.26492 12.7338 2.66797 11.9974 2.66797Z" stroke="currentColor" stroke-width="1.33333" stroke-linejoin="round"/>
+<path d="M6.22656 2.66797V13.3346" stroke="currentColor" stroke-width="1.33333"/>
+<path d="M9.77344 2.66797V13.3346" stroke="currentColor" stroke-width="1.33333"/>
+</svg></button>
+            <button type="button" class="summary-view-btn" data-view="plot" aria-pressed="false" aria-label="Plot view" title="Plot view"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M6.05888,2.96297c0.2608,0 0.47222,0.21142 0.47222,0.47222v9.12961c0,0.2608 -0.21142,0.4722 -0.47222,0.4722c-0.2608,0 -0.47222,-0.2114 -0.47222,-0.4722v-9.12961c0,-0.2608 0.21142,-0.47222 0.47222,-0.47222zM13.8235,4.85186c0.2608,0 0.4722,0.21142 0.4722,0.47222v7.24072c0,0.2608 -0.2114,0.4722 -0.4722,0.4722c-0.2608,0 -0.4723,-0.2114 -0.4723,-0.4722v-7.24072c0,-0.2608 0.2115,-0.47222 0.4723,-0.47222zM2.17657,6.74074c0.2608,0 0.47222,0.21143 0.47222,0.47223v5.35183c0,0.2608 -0.21142,0.4722 -0.47222,0.4722c-0.2608,0 -0.47222,-0.2114 -0.47222,-0.4722v-5.35183c0,-0.2608 0.21142,-0.47223 0.47222,-0.47223zM9.94116,8.62963c0.26084,0 0.47224,0.21142 0.47224,0.47223v3.46294c0,0.2608 -0.2114,0.4722 -0.47224,0.4722c-0.2608,0 -0.47222,-0.2114 -0.47222,-0.4722v-3.46294c0,-0.26081 0.21142,-0.47223 0.47222,-0.47223z" fill="currentColor"/>
+</svg></button>
+            <button type="button" class="summary-view-btn" data-view="trend" aria-pressed="false" aria-label="Trend view" title="Metric over time"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M2.66667,2c0.36818,0 0.66666,0.29848 0.66666,0.66667v7.0572l1.69526,-1.69527c0.72059,-0.7206 1.88888,-0.7206 2.60948,0c0.19986,0.19987 0.524,0.19987 0.72386,0l1.5572,-1.55719c0.78107,-0.78106 2.04737,-0.78105 2.82837,0l0.3906,0.39052c0.2603,0.26034 0.2603,0.68247 0,0.9428c-0.2604,0.26034 -0.6825,0.26034 -0.9428,0l-0.3906,-0.39053c-0.2603,-0.26033 -0.6824,-0.26033 -0.9428,0l-1.55717,1.5572c-0.7206,0.7206 -1.88886,0.7206 -2.60946,0c-0.1999,-0.19987 -0.52398,-0.19987 -0.72386,0l-2.63808,2.6381v0.3905c0,0.3682 0.29848,0.6667 0.66667,0.6667h9.3333c0.3682,0 0.6667,0.2984 0.6667,0.6666c0,0.3682 -0.2985,0.6667 -0.6667,0.6667h-9.3333c-1.10457,0 -2,-0.8954 -2,-2v-9.33333c0,-0.36819 0.29848,-0.66667 0.66667,-0.66667z" fill="currentColor"/>
+</svg></button>
+        </div>
+        <div class="skore-summary-filter">
+    <button type="button" class="skore-summary-filter-toggle" aria-haspopup="true" aria-expanded="false" aria-label="Filter" title="Filter"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M2 3.33203H14" stroke="currentColor" stroke-width="1.33333" stroke-linecap="round"/>
+<path d="M6 12.668H10" stroke="currentColor" stroke-width="1.33333" stroke-linecap="round"/>
+<path d="M4 8H12" stroke="currentColor" stroke-width="1.33333" stroke-linecap="round"/>
+</svg></button>
+    <div class="skore-summary-filter-panel" hidden>
+        
+        <div class="skore-summary-filter-field">
+            <button type="button" class="skore-summary-filter-field-toggle" aria-haspopup="true" data-field="report_type">
+                <span class="skore-summary-filter-field-label">Report type</span>
+                <span class="skore-summary-filter-arrow" aria-hidden="true"></span>
+            </button>
+            <div class="skore-summary-filter-submenu">
+                
+                <label class="skore-summary-filter-option">
+                    <input type="checkbox" class="skore-summary-filter-value" data-filter-field="report_type" data-filter-value="estimator" checked>
+                    <span class="skore-summary-filter-option-label">estimator</span>
+                </label>
+                
+            </div>
+        </div>
+        
+        <div class="skore-summary-filter-field">
+            <button type="button" class="skore-summary-filter-field-toggle" aria-haspopup="true" data-field="learner">
+                <span class="skore-summary-filter-field-label">Learner</span>
+                <span class="skore-summary-filter-arrow" aria-hidden="true"></span>
+            </button>
+            <div class="skore-summary-filter-submenu">
+                
+                <label class="skore-summary-filter-option">
+                    <input type="checkbox" class="skore-summary-filter-value" data-filter-field="learner" data-filter-value="XGBClassifier" checked>
+                    <span class="skore-summary-filter-option-label">XGBClassifier</span>
+                </label>
+                
+            </div>
+        </div>
+        
+        <div class="skore-summary-filter-field">
+            <button type="button" class="skore-summary-filter-field-toggle" aria-haspopup="true" data-field="dataset">
+                <span class="skore-summary-filter-field-label">Dataset</span>
+                <span class="skore-summary-filter-arrow" aria-hidden="true"></span>
+            </button>
+            <div class="skore-summary-filter-submenu">
+                
+                <label class="skore-summary-filter-option">
+                    <input type="checkbox" class="skore-summary-filter-value" data-filter-field="dataset" data-filter-value="03e6ddd67d83af01fd2b7cd36b9654b8" checked>
+                    <span class="skore-summary-filter-option-label">03e6ddd67d83af01fd2b7cd36b9654b8</span>
+                </label>
+                
+            </div>
+        </div>
+        
+        <div class="skore-summary-filter-field">
+            <button type="button" class="skore-summary-filter-field-toggle" aria-haspopup="true" data-field="date">
+                <span class="skore-summary-filter-field-label">Date</span>
+                <span class="skore-summary-filter-arrow" aria-hidden="true"></span>
+            </button>
+            <div class="skore-summary-filter-submenu skore-summary-date-submenu">
+                <label class="skore-summary-date-field">
+                    <span>Start</span>
+                    <input type="datetime-local" step="1" class="skore-summary-date-start">
+                </label>
+                <label class="skore-summary-date-field">
+                    <span>End</span>
+                    <input type="datetime-local" step="1" class="skore-summary-date-end">
+                </label>
+                <button type="button" class="skore-summary-date-clear">Clear</button>
+            </div>
+        </div>
+    </div>
+</div>
+        <div class="skore-summary-query-bar">
+            <code class="skore-summary-query" data-empty="Tick rows to build a query string.">Tick rows to build a query string.</code>
+            <button type="button" class="skore-summary-copy" aria-label="Copy query string" title="Copy query string"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M3.55545,3.55555v5.55556h5.55555v-5.55556zM12.7221,5.77778c0.4602,0 0.8333,0.37306 0.8333,0.83333v6.11109c0,0.4602 -0.3731,0.8334 -0.8333,0.8334h-6.1111c-0.46026,0 -0.83333,-0.3732 -0.83333,-0.8334v-2.5h-2.5c-0.46027,0 -0.83333,-0.37313 -0.83333,-0.83331v-6.11111c0,-0.46024 0.37309,-0.83334 0.83333,-0.83334h6.11111c0.46018,0 0.83332,0.37307 0.83332,0.83334v2.5zM10.2221,6.88889v2.5c0,0.46021 -0.37311,0.83331 -0.83332,0.83331h-2.5v2.2222h5.55552v-5.55551z" fill="currentColor"/>
+</svg></button>
+            <button type="button" class="skore-summary-clear" aria-label="Clear selection" title="Clear selection"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.5 7.5L7.5 12.5M12.5 12.5L7.5 7.5M17.5 10C17.5 14.1422 14.1422 17.5 10 17.5C5.85787 17.5 2.5 14.1422 2.5 10C2.5 5.85787 5.85787 2.5 10 2.5C14.1422 2.5 17.5 5.85787 17.5 10Z" stroke="currentColor" stroke-width="1.66667" stroke-linecap="round" stroke-linejoin="round"/>
+</svg></button>
+        </div>
+        <button type="button" class="report-tab-help skore-summary-help" aria-label="How to use the query string">
+            ?
+            <span class="tooltip-text skore-summary-help-tip">
+                Select reports by ticking rows in Table view, brushing axes in Plot
+                view, or dragging the range cursors in Trend view; the selection is
+                shared across all three. Copy the query string and pass it to
+                <code>Summary.query(...)</code> to recover the selected reports.
+            </span>
+        </button>
+    </div>
+    <div class="summary-controls">
+        <div class="skore-summary-groupby">
+    <button type="button" class="skore-summary-groupby-toggle" aria-haspopup="true" aria-expanded="false" aria-label="Group by" title="Group by"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M0.5,2.75c0,-0.41421 0.33579,-0.75 0.75,-0.75h1.5c0.41421,0 0.75,0.33579 0.75,0.75c0,0.41421 -0.33579,0.75 -0.75,0.75h-1.5c-0.41421,0 -0.75,-0.33579 -0.75,-0.75zM6.5,2.75c0,-0.41421 0.33579,-0.75 0.75,-0.75h1.5c0.41421,0 0.75,0.33579 0.75,0.75c0,0.41421 -0.33579,0.75 -0.75,0.75h-1.5c-0.41421,0 -0.75,-0.33579 -0.75,-0.75zM12.5,2.75c0,-0.41421 0.3358,-0.75 0.75,-0.75h1.5c0.4142,0 0.75,0.33579 0.75,0.75c0,0.41421 -0.3358,0.75 -0.75,0.75h-1.5c-0.4142,0 -0.75,-0.33579 -0.75,-0.75zM0.5,8c0,-0.41421 0.33579,-0.75 0.75,-0.75h13.5c0.4142,0 0.75,0.33579 0.75,0.75c0,0.41421 -0.3358,0.75 -0.75,0.75h-13.5c-0.41421,0 -0.75,-0.33579 -0.75,-0.75zM0.5,13.25c0,-0.4142 0.33579,-0.75 0.75,-0.75h1.5c0.41421,0 0.75,0.3358 0.75,0.75c0,0.4142 -0.33579,0.75 -0.75,0.75h-1.5c-0.41421,0 -0.75,-0.3358 -0.75,-0.75zM6.5,13.25c0,-0.4142 0.33579,-0.75 0.75,-0.75h1.5c0.41421,0 0.75,0.3358 0.75,0.75c0,0.4142 -0.33579,0.75 -0.75,0.75h-1.5c-0.41421,0 -0.75,-0.3358 -0.75,-0.75zM12.5,13.25c0,-0.4142 0.3358,-0.75 0.75,-0.75h1.5c0.4142,0 0.75,0.3358 0.75,0.75c0,0.4142 -0.3358,0.75 -0.75,0.75h-1.5c-0.4142,0 -0.75,-0.3358 -0.75,-0.75z" fill="currentColor"/>
+</svg></button>
+    <div class="skore-summary-groupby-panel" hidden>
+        <div class="skore-summary-filter-field">
+            <button type="button" class="skore-summary-filter-field-toggle" aria-haspopup="true" data-field="group-date">
+                <span class="skore-summary-filter-field-label">Date</span>
+                <span class="skore-summary-filter-arrow" aria-hidden="true"></span>
+            </button>
+            <div class="skore-summary-filter-submenu">
+                <button type="button" class="skore-summary-group-option" data-group="date" data-unit="day">Day</button>
+                <button type="button" class="skore-summary-group-option" data-group="date" data-unit="hour">Hour</button>
+                <div class="skore-summary-group-custom">
+                    <span class="skore-summary-group-custom-title">Custom: every</span>
+                    <div class="skore-summary-group-custom-row">
+                        <input type="number" min="1" value="1" class="skore-summary-group-n" aria-label="Interval count">
+                        <select class="skore-summary-group-unit" aria-label="Interval unit">
+                            <option value="second">second</option>
+                            <option value="minute">minute</option>
+                            <option value="hour">hour</option>
+                            <option value="day">day</option>
+                            <option value="week">week</option>
+                            <option value="month">month</option>
+                        </select>
+                    </div>
+                    <button type="button" class="skore-summary-group-option skore-summary-group-custom-apply" data-group="date" data-unit="custom">Apply</button>
+                </div>
+            </div>
+        </div>
+        <button type="button" class="skore-summary-group-option" data-group="learner">Learner</button>
+        <button type="button" class="skore-summary-group-option" data-group="report_type">Estimator type</button>
+        <button type="button" class="skore-summary-group-option skore-summary-group-none" data-group="none">None</button>
+    </div>
+</div>
+        <label class="skore-summary-trend-metric-field">Metric
+            <select class="skore-summary-trend-metric" aria-label="Metric"></select>
+        </label>
+        <div class="skore-summary-columns">
+    <button type="button" class="skore-summary-columns-toggle" aria-haspopup="true" aria-expanded="false" aria-label="Show columns" title="Show columns"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M7.99978,13.5556c-0.61366,0 -1.11111,-0.4975 -1.11111,-1.1112c0,-0.6136 0.49745,-1.1111 1.11111,-1.1111c0.61367,0 1.11111,0.4975 1.11111,1.1111c0,0.6137 -0.49744,1.1112 -1.11111,1.1112zM7.99978,9.11111c-0.61366,0 -1.11111,-0.49744 -1.11111,-1.11111c0,-0.61366 0.49745,-1.11111 1.11111,-1.11111c0.61367,0 1.11111,0.49745 1.11111,1.11111c0,0.61367 -0.49744,1.11111 -1.11111,1.11111zM7.99978,4.66667c-0.61366,0 -1.11111,-0.49745 -1.11111,-1.11111c0,-0.61367 0.49745,-1.11111 1.11111,-1.11111c0.61367,0 1.11111,0.49744 1.11111,1.11111c0,0.61366 -0.49744,1.11111 -1.11111,1.11111z" fill="currentColor"/>
+</svg></button>
+    <div class="skore-summary-columns-panel" hidden>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="1" data-column-key="id" data-column-role="metric" checked>
+            ID
+        </label>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="2" data-column-key="key" data-column-role="metadata" checked>
+            Key
+        </label>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="3" data-column-key="log_loss" data-column-role="metric" checked>
+            Log loss
+        </label>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="4" data-column-key="roc_auc" data-column-role="metric" checked>
+            ROC AUC
+        </label>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="5" data-column-key="predict_time" data-column-role="metric" checked>
+            Predict time (s)
+        </label>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="6" data-column-key="date" data-column-role="metadata" checked>
+            Date
+        </label>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="7" data-column-key="learner" data-column-role="metadata">
+            Learner
+        </label>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="8" data-column-key="dataset" data-column-role="metadata">
+            Dataset
+        </label>
+        
+        <label class="skore-summary-columns-option">
+            <input type="checkbox" class="skore-summary-column-toggle" data-column-index="9" data-column-key="report_type" data-column-role="metadata">
+            Report type
+        </label>
+        
+    </div>
+</div>
+        <div class="skore-summary-search">
+            <svg class="skore-summary-search-icon" viewBox="0 0 512 512" width="14" height="14" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z"/>
+            </svg>
+            <input type="search" class="skore-summary-search-input" placeholder="Search reports..." aria-label="Search reports">
+        </div>
+    </div>
+    <div class="summary-table-wrap">
+    <table class="summary-table">
+        <thead>
+            <tr>
+                <th class="summary-select-col"></th>
+                
+                <th class="summary-sortable" data-column-index="1" data-column-key="id" data-sort-kind="text" data-column-role="metric" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">ID</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+                <th class="summary-sortable" data-column-index="2" data-column-key="key" data-sort-kind="text" data-column-role="metadata" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">Key</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+                <th class="summary-sortable" data-column-index="3" data-column-key="log_loss" data-sort-kind="number" data-column-role="metric" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">Log loss</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+                <th class="summary-sortable" data-column-index="4" data-column-key="roc_auc" data-sort-kind="number" data-column-role="metric" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">ROC AUC</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+                <th class="summary-sortable" data-column-index="5" data-column-key="predict_time" data-sort-kind="number" data-column-role="metric" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">Predict time (s)</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+                <th class="summary-sortable" data-column-index="6" data-column-key="date" data-sort-kind="date" data-column-role="metadata" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">Date</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+                <th class="summary-sortable" data-column-index="7" data-column-key="learner" data-sort-kind="text" data-column-role="metadata" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">Learner</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+                <th class="summary-sortable" data-column-index="8" data-column-key="dataset" data-sort-kind="text" data-column-role="metadata" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">Dataset</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+                <th class="summary-sortable" data-column-index="9" data-column-key="report_type" data-sort-kind="text" data-column-role="metadata" tabindex="0" role="button" aria-sort="none">
+                    <span class="summary-th-label">Report type</span>
+                    <span class="summary-sort-ind" aria-hidden="true">
+                        <span class="summary-sort-icon summary-sort-icon--none"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M10.6669 2.60971C10.6669 2.24163 10.9649 1.9429 11.3329 1.94272C11.7011 1.94272 11.9999 2.24152 11.9999 2.60971V11.9994L13.5282 10.471C13.7886 10.2107 14.2113 10.2107 14.4716 10.471C14.732 10.7314 14.732 11.154 14.4716 11.4144L12.2763 13.6097C11.7557 14.1303 10.9112 14.1302 10.3905 13.6097L8.19524 11.4144C7.93489 11.154 7.93489 10.7314 8.19524 10.471C8.45549 10.211 8.8773 10.2111 9.13762 10.471L10.6669 12.0003V2.60971ZM3.99992 13.2757V3.88608L2.4716 5.4144C2.21127 5.67468 1.78858 5.67468 1.52825 5.4144C1.26791 5.15407 1.26795 4.73139 1.52825 4.47104L3.72356 2.27573C4.24421 1.75508 5.08858 1.75519 5.6093 2.27573L7.80461 4.47104C8.06496 4.73139 8.06496 5.15405 7.80461 5.4144C7.54437 5.67441 7.12254 5.6743 6.86223 5.4144L5.33293 3.8851V13.2757C5.33293 13.6438 5.03496 13.9425 4.66692 13.9427C4.29873 13.9427 3.99992 13.6439 3.99992 13.2757Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--asc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 12.6667C12.6661 13.0348 12.3673 13.3336 11.9991 13.3336C11.6309 13.3336 11.3321 13.0348 11.3321 12.6667V4.944L10.4718 5.80435C10.2115 6.06476 9.78882 6.06557 9.5284 5.80533C9.26799 5.54506 9.26816 5.12239 9.5284 4.86197L11.5274 2.86197C11.6524 2.73692 11.8223 2.6667 11.9991 2.66666C12.1757 2.66668 12.3448 2.73714 12.4698 2.86197L14.4718 4.86197C14.7318 5.12221 14.7317 5.54401 14.4718 5.80435C14.2115 6.06476 13.7888 6.06557 13.5284 5.80533L12.6661 4.944V12.6667Z" fill="currentColor"/>
+<path d="M2.66707 12.0003C2.29888 12.0003 2.00008 11.7015 2.00008 11.3333C2.00008 10.9651 2.29888 10.6663 2.66707 10.6663H8.00008C8.36827 10.6663 8.66707 10.9651 8.66707 11.3333C8.66707 11.7015 8.36827 12.0003 8.00008 12.0003H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 5.33365C2.29838 5.33347 2.00041 5.03474 2.00041 4.66666C2.00041 4.29858 2.29838 3.99984 2.66642 3.99966H5.33341C5.7016 3.99966 6.00041 4.29847 6.00041 4.66666C6.00041 5.03485 5.7016 5.33365 5.33341 5.33365H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 8.66698C2.29856 8.66698 1.99976 8.36818 1.99976 7.99999C1.99976 7.6318 2.29856 7.333 2.66675 7.333H6.66675C7.03494 7.333 7.33374 7.6318 7.33374 7.99999C7.33374 8.36818 7.03494 8.66698 6.66675 8.66698H2.66675Z" fill="currentColor"/>
+</svg></span>
+                        <span class="summary-sort-icon summary-sort-icon--desc"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M12.6661 3.33334C12.6661 2.96518 12.3673 2.6664 11.9991 2.66635C11.6309 2.66635 11.3321 2.96515 11.3321 3.33334V11.056L10.4718 10.1956C10.2115 9.93524 9.78882 9.93443 9.5284 10.1947C9.26799 10.4549 9.26816 10.8776 9.5284 11.138L11.5274 13.138C11.6524 13.2631 11.8223 13.3333 11.9991 13.3333C12.1757 13.3333 12.3448 13.2629 12.4698 13.138L14.4718 11.138C14.7318 10.8778 14.7317 10.456 14.4718 10.1956C14.2115 9.93524 13.7888 9.93443 13.5284 10.1947L12.6661 11.056V3.33334Z" fill="currentColor"/>
+<path d="M2.66707 3.99968C2.29888 3.99968 2.00008 4.29849 2.00008 4.66668C2.00008 5.03487 2.29888 5.33367 2.66707 5.33367H8.00008C8.36827 5.33367 8.66707 5.03487 8.66707 4.66668C8.66707 4.29849 8.36827 3.99968 8.00008 3.99968H2.66707Z" fill="currentColor"/>
+<path d="M2.66642 10.6664C2.29838 10.6665 2.00041 10.9653 2.00041 11.3333C2.00041 11.7014 2.29838 12.0002 2.66642 12.0003H5.33341C5.7016 12.0003 6.00041 11.7015 6.00041 11.3333C6.00041 10.9652 5.7016 10.6664 5.33341 10.6664H2.66642Z" fill="currentColor"/>
+<path d="M2.66675 7.33302C2.29856 7.33302 1.99976 7.63182 1.99976 8.00001C1.99976 8.3682 2.29856 8.667 2.66675 8.667H6.66675C7.03494 8.667 7.33374 8.3682 7.33374 8.00001C7.33374 7.63182 7.03494 7.33302 6.66675 7.33302H2.66675Z" fill="currentColor"/>
+</svg></span>
+                    </span>
+                </th>
+                
+            </tr>
+        </thead>
+        <tbody>
+            
+            <tr data-report-type="estimator" data-learner="XGBClassifier" data-dataset="03e6ddd67d83af01fd2b7cd36b9654b8" data-date="2026-07-31T08:25:00.973786+00:00" data-key="FeatureSet_1_All_Columns">
+                <td class="summary-select-col">
+                    <input type="checkbox" class="skore-summary-row" data-id="39788003859861274358668971028916787770" aria-label="Select report 39788003859861274358668971028916787770">
+                </td>
+                
+                <td data-column-index="1" data-sort="39788003859861274358668971028916787770">39788003859861274358668971028916787770</td>
+                
+                <td data-column-index="2" data-sort="featureset_1_all_columns">FeatureSet_1_All_Columns</td>
+                
+                <td data-column-index="3" data-sort="0.012059101834893227"></td>
+                
+                <td data-column-index="4" data-sort="0.974508273083938"></td>
+                
+                <td data-column-index="5" data-sort="0.08992284499981906"></td>
+                
+                <td data-column-index="6" data-sort="2026-07-31T08:25:00.973786+00:00">2026-07-31T08:25:00.973786+00:00</td>
+                
+                <td data-column-index="7" data-sort="xgbclassifier">XGBClassifier</td>
+                
+                <td data-column-index="8" data-sort="03e6ddd67d83af01fd2b7cd36b9654b8">03e6ddd67d83af01fd2b7cd36b9654b8</td>
+                
+                <td data-column-index="9" data-sort="estimator">estimator</td>
+                
+            </tr>
+            
+            <tr data-report-type="estimator" data-learner="XGBClassifier" data-dataset="03e6ddd67d83af01fd2b7cd36b9654b8" data-date="2026-07-31T08:25:24.300098+00:00" data-key="FeatureSet_2_No_Personal_IDs">
+                <td class="summary-select-col">
+                    <input type="checkbox" class="skore-summary-row" data-id="11533435497164390500198830277324799803" aria-label="Select report 11533435497164390500198830277324799803">
+                </td>
+                
+                <td data-column-index="1" data-sort="11533435497164390500198830277324799803">11533435497164390500198830277324799803</td>
+                
+                <td data-column-index="2" data-sort="featureset_2_no_personal_ids">FeatureSet_2_No_Personal_IDs</td>
+                
+                <td data-column-index="3" data-sort="0.009874256327748299"></td>
+                
+                <td data-column-index="4" data-sort="0.9789138050937528"></td>
+                
+                <td data-column-index="5" data-sort="0.08749281401105691"></td>
+                
+                <td data-column-index="6" data-sort="2026-07-31T08:25:24.300098+00:00">2026-07-31T08:25:24.300098+00:00</td>
+                
+                <td data-column-index="7" data-sort="xgbclassifier">XGBClassifier</td>
+                
+                <td data-column-index="8" data-sort="03e6ddd67d83af01fd2b7cd36b9654b8">03e6ddd67d83af01fd2b7cd36b9654b8</td>
+                
+                <td data-column-index="9" data-sort="estimator">estimator</td>
+                
+            </tr>
+            
+            <tr data-report-type="estimator" data-learner="XGBClassifier" data-dataset="03e6ddd67d83af01fd2b7cd36b9654b8" data-date="2026-07-31T08:25:31.817860+00:00" data-key="FeatureSet_3_No_State_City">
+                <td class="summary-select-col">
+                    <input type="checkbox" class="skore-summary-row" data-id="137558665742197731934338214943671070965" aria-label="Select report 137558665742197731934338214943671070965">
+                </td>
+                
+                <td data-column-index="1" data-sort="137558665742197731934338214943671070965">137558665742197731934338214943671070965</td>
+                
+                <td data-column-index="2" data-sort="featureset_3_no_state_city">FeatureSet_3_No_State_City</td>
+                
+                <td data-column-index="3" data-sort="0.00881563127040863"></td>
+                
+                <td data-column-index="4" data-sort="0.9895323509729568"></td>
+                
+                <td data-column-index="5" data-sort="0.28510223000193946"></td>
+                
+                <td data-column-index="6" data-sort="2026-07-31T08:25:31.817860+00:00">2026-07-31T08:25:31.817860+00:00</td>
+                
+                <td data-column-index="7" data-sort="xgbclassifier">XGBClassifier</td>
+                
+                <td data-column-index="8" data-sort="03e6ddd67d83af01fd2b7cd36b9654b8">03e6ddd67d83af01fd2b7cd36b9654b8</td>
+                
+                <td data-column-index="9" data-sort="estimator">estimator</td>
+                
+            </tr>
+            
+            <tr data-report-type="estimator" data-learner="XGBClassifier" data-dataset="03e6ddd67d83af01fd2b7cd36b9654b8" data-date="2026-07-31T08:25:39.365090+00:00" data-key="FeatureSet_4_No_CityPop">
+                <td class="summary-select-col">
+                    <input type="checkbox" class="skore-summary-row" data-id="55539935578630499591867289134514950730" aria-label="Select report 55539935578630499591867289134514950730">
+                </td>
+                
+                <td data-column-index="1" data-sort="55539935578630499591867289134514950730">55539935578630499591867289134514950730</td>
+                
+                <td data-column-index="2" data-sort="featureset_4_no_citypop">FeatureSet_4_No_CityPop</td>
+                
+                <td data-column-index="3" data-sort="0.008979377336800098"></td>
+                
+                <td data-column-index="4" data-sort="0.9830929918253271"></td>
+                
+                <td data-column-index="5" data-sort="0.09941345799597912"></td>
+                
+                <td data-column-index="6" data-sort="2026-07-31T08:25:39.365090+00:00">2026-07-31T08:25:39.365090+00:00</td>
+                
+                <td data-column-index="7" data-sort="xgbclassifier">XGBClassifier</td>
+                
+                <td data-column-index="8" data-sort="03e6ddd67d83af01fd2b7cd36b9654b8">03e6ddd67d83af01fd2b7cd36b9654b8</td>
+                
+                <td data-column-index="9" data-sort="estimator">estimator</td>
+                
+            </tr>
+            
+            <tr data-report-type="estimator" data-learner="XGBClassifier" data-dataset="03e6ddd67d83af01fd2b7cd36b9654b8" data-date="2026-07-31T08:26:02.659468+00:00" data-key="FeatureSet_5_Only_State_City">
+                <td class="summary-select-col">
+                    <input type="checkbox" class="skore-summary-row" data-id="129875836482836200672234556228998103032" aria-label="Select report 129875836482836200672234556228998103032">
+                </td>
+                
+                <td data-column-index="1" data-sort="129875836482836200672234556228998103032">129875836482836200672234556228998103032</td>
+                
+                <td data-column-index="2" data-sort="featureset_5_only_state_city">FeatureSet_5_Only_State_City</td>
+                
+                <td data-column-index="3" data-sort="0.00986881647258997"></td>
+                
+                <td data-column-index="4" data-sort="0.9768635761241816"></td>
+                
+                <td data-column-index="5" data-sort="0.1275069460098166"></td>
+                
+                <td data-column-index="6" data-sort="2026-07-31T08:26:02.659468+00:00">2026-07-31T08:26:02.659468+00:00</td>
+                
+                <td data-column-index="7" data-sort="xgbclassifier">XGBClassifier</td>
+                
+                <td data-column-index="8" data-sort="03e6ddd67d83af01fd2b7cd36b9654b8">03e6ddd67d83af01fd2b7cd36b9654b8</td>
+                
+                <td data-column-index="9" data-sort="estimator">estimator</td>
+                
+            </tr>
+            
+            <tr data-report-type="estimator" data-learner="XGBClassifier" data-dataset="03e6ddd67d83af01fd2b7cd36b9654b8" data-date="2026-07-31T08:26:08.257173+00:00" data-key="FeatureSet_6_Only_CityPop">
+                <td class="summary-select-col">
+                    <input type="checkbox" class="skore-summary-row" data-id="57281525729252694250627273602972842239" aria-label="Select report 57281525729252694250627273602972842239">
+                </td>
+                
+                <td data-column-index="1" data-sort="57281525729252694250627273602972842239">57281525729252694250627273602972842239</td>
+                
+                <td data-column-index="2" data-sort="featureset_6_only_citypop">FeatureSet_6_Only_CityPop</td>
+                
+                <td data-column-index="3" data-sort="0.007884029299020767"></td>
+                
+                <td data-column-index="4" data-sort="0.9893945755862015"></td>
+                
+                <td data-column-index="5" data-sort="0.10870225500548258"></td>
+                
+                <td data-column-index="6" data-sort="2026-07-31T08:26:08.257173+00:00">2026-07-31T08:26:08.257173+00:00</td>
+                
+                <td data-column-index="7" data-sort="xgbclassifier">XGBClassifier</td>
+                
+                <td data-column-index="8" data-sort="03e6ddd67d83af01fd2b7cd36b9654b8">03e6ddd67d83af01fd2b7cd36b9654b8</td>
+                
+                <td data-column-index="9" data-sort="estimator">estimator</td>
+                
+            </tr>
+            
+        </tbody>
+    </table>
+</div>
+    <div class="summary-plot-wrap">
+    <label class="skore-summary-color-metric-field">Color by
+        <select class="skore-summary-color-metric" aria-label="Color metric"></select>
+    </label>
+    <div class="summary-plot"></div>
+    <p class="summary-plot-empty" hidden>Parallel coordinates need at least two metric columns.</p>
+</div>
+    <div class="summary-trend-wrap">
+    <div class="summary-trend"></div>
+    <p class="summary-trend-empty" hidden>Need at least one metric column to plot.</p>
+    <p class="summary-trend-undated-empty" hidden>No dated reports to plot.</p>
+</div>
+    
+</div>
+    </template>
+
+    <div id="skore-summary-862f4336"></div>
+
+    <script>
+function detectTheme(refElementId) {
+    const body = document.querySelector("body");
+
+    // Check VSCode theme
+    const themeKindAttr = body.getAttribute("data-vscode-theme-kind");
+    const themeNameAttr = body.getAttribute("data-vscode-theme-name");
+
+    if (themeKindAttr && themeNameAttr) {
+        const themeKind = themeKindAttr.toLowerCase();
+        const themeName = themeNameAttr.toLowerCase();
+
+        if (themeKind.includes("dark") || themeName.includes("dark")) {
+            return "dark";
+        }
+        if (themeKind.includes("light") || themeName.includes("light")) {
+            return "light";
+        }
+    }
+
+    // Check Jupyter theme
+    if (body.getAttribute("data-jp-theme-light") === "false") {
+        return "dark";
+    } else if (body.getAttribute("data-jp-theme-light") === "true") {
+        return "light";
+    }
+
+    // Guess based on a reference element's color (luma)
+    if (refElementId) {
+        const refElement = document.getElementById(refElementId);
+        if (refElement) {
+            const color = window.getComputedStyle(refElement, null).getPropertyValue("color");
+            const match = color.match(/^rgb[a]?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+            if (match) {
+                const r = parseInt(match[1], 10);
+                const g = parseInt(match[2], 10);
+                const b = parseInt(match[3], 10);
+                // https://en.wikipedia.org/wiki/HSL_and_HSV#Lightness
+                const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+
+                if (luma > 180) {
+                    return "dark";
+                }
+                if (luma < 75) {
+                    return "light";
+                }
+            }
+        }
+    }
+
+    // Fallback to system preference
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyThemeToReportContainer(container, refElementId) {
+    const theme = detectTheme(refElementId);
+    if (theme === "dark") {
+        container.setAttribute("data-theme", "dark");
+        container.classList.add("dark-theme");
+    } else {
+        container.removeAttribute("data-theme");
+        container.classList.remove("dark-theme");
+    }
+}
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function middleEllipsis(text, head = 5, tail = 5) {
+    if (text.length <= head + tail + 3) {
+        return text;
+    }
+    return text.slice(0, head) + "..." + text.slice(-tail);
+}
+
+function formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+    const pad = (n) => String(n).padStart(2, "0");
+    return (
+        date.getUTCFullYear() +
+        "-" +
+        pad(date.getUTCMonth() + 1) +
+        "-" +
+        pad(date.getUTCDate()) +
+        " " +
+        pad(date.getUTCHours()) +
+        ":" +
+        pad(date.getUTCMinutes()) +
+        ":" +
+        pad(date.getUTCSeconds())
+    );
+}
+
+function formatNumber(raw) {
+    if (!raw) {
+        return "";
+    }
+    const value = Number.parseFloat(raw);
+    if (!Number.isFinite(value)) {
+        return "";
+    }
+    return Number.parseFloat(value.toPrecision(6)).toString();
+}
+
+function pad(value) {
+    return String(value).padStart(2, "0");
+}
+
+function formatBucket(date, unit) {
+    const day =
+        date.getUTCFullYear() +
+        "-" +
+        pad(date.getUTCMonth() + 1) +
+        "-" +
+        pad(date.getUTCDate());
+    if (unit === "second") {
+        return (
+            day +
+            " " +
+            pad(date.getUTCHours()) +
+            ":" +
+            pad(date.getUTCMinutes()) +
+            ":" +
+            pad(date.getUTCSeconds())
+        );
+    }
+    if (unit === "minute") {
+        return day + " " + pad(date.getUTCHours()) + ":" + pad(date.getUTCMinutes());
+    }
+    if (unit === "hour") {
+        return day + " " + pad(date.getUTCHours()) + ":00";
+    }
+    if (unit === "month") {
+        return date.getUTCFullYear() + "-" + pad(date.getUTCMonth() + 1);
+    }
+    return day;
+}
+
+function customBucketLabel(date, count, unit) {
+    const step = Math.max(1, count);
+    if (unit === "month") {
+        const months = date.getUTCFullYear() * 12 + date.getUTCMonth();
+        const bucket = Math.floor(months / step) * step;
+        const start = new Date(Date.UTC(Math.floor(bucket / 12), bucket % 12, 1));
+        return formatBucket(start, "month");
+    }
+    const unitMs = {
+        second: 1000,
+        minute: 60000,
+        hour: 3600000,
+        day: 86400000,
+        week: 604800000,
+    }[unit];
+    const buckets = Math.floor(date.getTime() / unitMs);
+    const start = new Date(Math.floor(buckets / step) * step * unitMs);
+    return formatBucket(start, unit);
+}
+
+function compareValues(a, b, kind) {
+    const emptyA = a === "";
+    const emptyB = b === "";
+    if (emptyA || emptyB) {
+        // Always push empty values to the bottom.
+        return emptyA === emptyB ? 0 : emptyA ? 1 : -1;
+    }
+    if (kind === "number") {
+        return parseFloat(a) - parseFloat(b);
+    }
+    if (kind === "date") {
+        return new Date(a) - new Date(b);
+    }
+    return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function anchorFor(i, count) {
+    if (i === 0) return "start";
+    if (i === count - 1) return "end";
+    return "middle";
+}
+
+function formatTick(value) {
+    if (!isFinite(value)) {
+        return "";
+    }
+    return Number.parseFloat(value.toPrecision(4)).toString();
+}
+
+function parseColor(value) {
+    const hex = value.trim().replace("#", "");
+    return [
+        parseInt(hex.slice(0, 2), 16),
+        parseInt(hex.slice(2, 4), 16),
+        parseInt(hex.slice(4, 6), 16),
+    ];
+}
+
+function themeColor(container, name, fallback) {
+    const raw = container
+        ? getComputedStyle(container).getPropertyValue(name).trim()
+        : "";
+    return raw ? parseColor(raw) : fallback;
+}
+
+function colorFor(t, container) {
+    // Map t in [0, 1] across theme blue -> theme orange; NaN is gray.
+    if (Number.isNaN(t)) {
+        return "rgb(150, 150, 150)";
+    }
+    const low = themeColor(container, "--color-blue", [48, 67, 240]);
+    const high = themeColor(container, "--color-orange", [249, 115, 22]);
+    const clamped = Math.min(1, Math.max(0, t));
+    const mix = (a, b) => Math.round(a + (b - a) * clamped);
+    return (
+        "rgb(" +
+        mix(low[0], high[0]) +
+        ", " +
+        mix(low[1], high[1]) +
+        ", " +
+        mix(low[2], high[2]) +
+        ")"
+    );
+}
+
+function appendText(group, className, x, y, anchor, text) {
+    const node = document.createElementNS(SVG_NS, "text");
+    node.setAttribute("class", className);
+    node.setAttribute("x", x);
+    node.setAttribute("y", y);
+    node.setAttribute("text-anchor", anchor);
+    node.textContent = text;
+    group.appendChild(node);
+}
+
+function appendLine(group, x1, y1, x2, y2, stroke, className) {
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("class", className);
+    line.setAttribute("x1", x1);
+    line.setAttribute("y1", y1);
+    line.setAttribute("x2", x2);
+    line.setAttribute("y2", y2);
+    line.setAttribute("stroke", stroke);
+    group.appendChild(line);
+}
+const SKORE_SUMMARY_ELLIPSIS_COLUMNS = new Set(["id", "dataset"]);
+
+function setupTable(ctx) {
+    const { shadowRoot, tbody, dataRows } = ctx;
+
+    shadowRoot.querySelectorAll(".summary-sortable").forEach((th) => {
+        const columnKey = th.dataset.columnKey;
+        const columnIndex = parseInt(th.dataset.columnIndex, 10);
+        const ellipsize = SKORE_SUMMARY_ELLIPSIS_COLUMNS.has(columnKey);
+        const kind = th.dataset.sortKind;
+        if (!ellipsize && kind !== "date" && kind !== "number") {
+            return;
+        }
+        dataRows.forEach((row) => {
+            const cell = row.querySelector(`td[data-column-index='${columnIndex}']`);
+            if (!cell) {
+                return;
+            }
+            // Numbers are sent raw in ``data-sort``; render the visible value here
+            // (and an empty cell for NA) so formatting is not duplicated in Python.
+            if (kind === "number") {
+                cell.textContent = formatNumber(cell.dataset.sort);
+                return;
+            }
+            if (!cell.textContent) {
+                return;
+            }
+            if (ellipsize) {
+                const full = cell.textContent;
+                cell.title = full;
+                cell.textContent = middleEllipsis(full);
+            } else {
+                cell.textContent = formatDate(cell.textContent);
+            }
+        });
+    });
+
+    shadowRoot.querySelectorAll(".skore-summary-filter-field-toggle").forEach((toggle) => {
+        if (!SKORE_SUMMARY_ELLIPSIS_COLUMNS.has(toggle.dataset.field)) {
+            return;
+        }
+        const field = toggle.closest(".skore-summary-filter-field");
+        if (!field) {
+            return;
+        }
+        field.querySelectorAll(".skore-summary-filter-option").forEach((label) => {
+            const span = label.querySelector(".skore-summary-filter-option-label");
+            if (!span) {
+                return;
+            }
+            const full = span.textContent;
+            label.title = full;
+            span.textContent = middleEllipsis(full);
+        });
+    });
+
+    function currentSearchTerm() {
+        return ctx.searchInput ? ctx.searchInput.value.trim().toLowerCase() : "";
+    }
+
+    function rowMatchesSearch(row, term) {
+        if (!term) {
+            return true;
+        }
+        for (const cell of row.querySelectorAll("td")) {
+            const haystack = (
+                cell.textContent +
+                " " +
+                (cell.getAttribute("title") || "") +
+                " " +
+                (cell.dataset.sort || "")
+            ).toLowerCase();
+            if (haystack.indexOf(term) !== -1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function collectCheckboxFilters() {
+        const activeByField = {};
+        ctx.filterValues.forEach((checkbox) => {
+            const field = checkbox.dataset.filterField;
+            if (!(field in activeByField)) {
+                activeByField[field] = new Set();
+            }
+            if (checkbox.checked) {
+                activeByField[field].add(checkbox.dataset.filterValue);
+            }
+        });
+        return activeByField;
+    }
+
+    function rowDatasetValue(row, field) {
+        return row.dataset[field === "report_type" ? "reportType" : field];
+    }
+
+    function passesCheckboxFilters(row, activeByField) {
+        return Object.entries(activeByField).every(([field, values]) =>
+            values.has(rowDatasetValue(row, field))
+        );
+    }
+
+    function passesDateRange(row) {
+        // Report dates are stored as UTC ISO strings, so the wall-clock entered
+        // in the (timezone-less) datetime-local inputs is read as UTC too by
+        // appending "Z"; this keeps the table column, grouping and filter aligned.
+        const start =
+            ctx.dateStart && ctx.dateStart.value
+                ? new Date(ctx.dateStart.value + "Z").getTime()
+                : null;
+        const end =
+            ctx.dateEnd && ctx.dateEnd.value
+                ? new Date(ctx.dateEnd.value + "Z").getTime()
+                : null;
+        if (start === null && end === null) {
+            return true;
+        }
+        const iso = row.dataset.date;
+        if (!iso) {
+            return false;
+        }
+        const time = new Date(iso).getTime();
+        if (Number.isNaN(time)) {
+            return false;
+        }
+        if (start !== null && time < start) {
+            return false;
+        }
+        if (end !== null && time > end) {
+            return false;
+        }
+        return true;
+    }
+
+    function updateSortIndicators() {
+        shadowRoot.querySelectorAll(".summary-sortable").forEach((header) => {
+            const columnIndex = parseInt(header.dataset.columnIndex, 10);
+            if (ctx.sortState && ctx.sortState.columnIndex === columnIndex) {
+                header.setAttribute(
+                    "aria-sort",
+                    ctx.sortState.ascending ? "ascending" : "descending"
+                );
+            } else {
+                header.setAttribute("aria-sort", "none");
+            }
+        });
+    }
+
+    function sortByColumn(header) {
+        const columnIndex = parseInt(header.dataset.columnIndex, 10);
+        const kind = header.dataset.sortKind;
+        const ascending = !(
+            ctx.sortState &&
+            ctx.sortState.columnIndex === columnIndex &&
+            ctx.sortState.ascending
+        );
+        ctx.sortState = { columnIndex, kind, ascending };
+        refresh();
+    }
+
+    shadowRoot.querySelectorAll(".summary-sortable").forEach((header) => {
+        header.addEventListener("click", () => sortByColumn(header));
+        header.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                sortByColumn(header);
+            }
+        });
+    });
+
+    function groupPrefix() {
+        if (!ctx.groupState) {
+            return "";
+        }
+        if (ctx.groupState.field === "learner") {
+            return "Learner: ";
+        }
+        if (ctx.groupState.field === "report_type") {
+            return "Estimator type: ";
+        }
+        return "Date: ";
+    }
+
+    function groupInfo(row) {
+        if (ctx.groupState.field === "learner") {
+            const value = row.dataset.learner || "(none)";
+            return { key: "learner:" + value, label: value };
+        }
+        if (ctx.groupState.field === "report_type") {
+            const value = row.dataset.reportType || "(none)";
+            return { key: "report_type:" + value, label: value };
+        }
+        const iso = row.dataset.date;
+        if (!iso) {
+            return { key: "date:none", label: "(no date)" };
+        }
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) {
+            return { key: "date:" + iso, label: iso };
+        }
+        let label;
+        if (ctx.groupState.unit === "custom") {
+            label = customBucketLabel(date, ctx.groupState.count, ctx.groupState.customUnit);
+        } else {
+            label = formatBucket(date, ctx.groupState.unit);
+        }
+        return { key: "date:" + ctx.groupState.unit + ":" + label, label };
+    }
+
+    function cellAt(row, naturalIndex) {
+        return row.querySelector('td[data-column-index="' + naturalIndex + '"]');
+    }
+
+    function headerAt(naturalIndex) {
+        return shadowRoot.querySelector('thead th[data-column-index="' + naturalIndex + '"]');
+    }
+
+    function setColumnVisible(naturalIndex, visible) {
+        const header = headerAt(naturalIndex);
+        if (header) {
+            header.classList.toggle("summary-col-hidden", !visible);
+        }
+        dataRows.forEach((row) => {
+            const cell = cellAt(row, naturalIndex);
+            if (cell) {
+                cell.classList.toggle("summary-col-hidden", !visible);
+            }
+        });
+    }
+
+    function refresh() {
+        const term = currentSearchTerm();
+        const activeByField = collectCheckboxFilters();
+        const visible = new Map();
+        dataRows.forEach((row) => {
+            const ok =
+                passesCheckboxFilters(row, activeByField) &&
+                passesDateRange(row) &&
+                rowMatchesSearch(row, term);
+            visible.set(row, ok);
+        });
+
+        let ordered = dataRows.slice();
+        if (ctx.sortState) {
+            const { columnIndex, kind, ascending } = ctx.sortState;
+            ordered.sort((rowA, rowB) => {
+                const a = cellAt(rowA, columnIndex).dataset.sort || "";
+                const b = cellAt(rowB, columnIndex).dataset.sort || "";
+                const result = compareValues(a, b, kind);
+                if (a === "" || b === "") {
+                    return result;
+                }
+                return ascending ? result : -result;
+            });
+        }
+
+        tbody.replaceChildren();
+
+        if (ctx.groupState) {
+            // Group separators span only the columns currently shown so the bar
+            // never overshoots when columns are hidden.
+            const visibleColumnCount = shadowRoot.querySelectorAll(
+                "thead th:not(.summary-col-hidden)"
+            ).length;
+            const groups = [];
+            const byKey = new Map();
+            ordered.forEach((row) => {
+                const info = groupInfo(row);
+                if (!byKey.has(info.key)) {
+                    byKey.set(info.key, { label: info.label, rows: [] });
+                    groups.push(byKey.get(info.key));
+                }
+                byKey.get(info.key).rows.push(row);
+            });
+            groups.forEach((group) => {
+                const shown = group.rows.filter((row) => visible.get(row)).length;
+                const header = document.createElement("tr");
+                header.className = "summary-group-header";
+                const cell = document.createElement("td");
+                cell.colSpan = visibleColumnCount;
+                cell.textContent = groupPrefix() + group.label + " (" + shown + ")";
+                header.appendChild(cell);
+                if (shown === 0) {
+                    header.style.display = "none";
+                }
+                tbody.appendChild(header);
+                group.rows.forEach((row) => {
+                    row.style.display = visible.get(row) ? "" : "none";
+                    tbody.appendChild(row);
+                });
+            });
+        } else {
+            ordered.forEach((row) => {
+                row.style.display = visible.get(row) ? "" : "none";
+                tbody.appendChild(row);
+            });
+        }
+
+        updateSortIndicators();
+    }
+
+    ctx.filterValues.forEach((checkbox) => {
+        checkbox.addEventListener("change", refresh);
+    });
+    if (ctx.dateStart) {
+        ctx.dateStart.addEventListener("input", refresh);
+    }
+    if (ctx.dateEnd) {
+        ctx.dateEnd.addEventListener("input", refresh);
+    }
+    const dateClear = shadowRoot.querySelector(".skore-summary-date-clear");
+    if (dateClear) {
+        dateClear.addEventListener("click", () => {
+            if (ctx.dateStart) ctx.dateStart.value = "";
+            if (ctx.dateEnd) ctx.dateEnd.value = "";
+            refresh();
+        });
+    }
+
+    function markActiveGroup(active) {
+        ctx.groupOptions.forEach((option) => {
+            option.classList.toggle("skore-summary-group-option--active", option === active);
+        });
+    }
+
+    ctx.groupOptions.forEach((option) => {
+        option.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const group = option.dataset.group;
+            if (group === "none") {
+                ctx.groupState = null;
+                markActiveGroup(null);
+            } else if (group === "date") {
+                const unit = option.dataset.unit;
+                if (unit === "custom") {
+                    const count = Math.max(
+                        1,
+                        parseInt(ctx.groupN ? ctx.groupN.value : "1", 10) || 1
+                    );
+                    ctx.groupState = {
+                        field: "date",
+                        unit: "custom",
+                        count,
+                        customUnit: ctx.groupUnit ? ctx.groupUnit.value : "hour",
+                    };
+                } else {
+                    ctx.groupState = { field: "date", unit };
+                }
+                markActiveGroup(option);
+            } else {
+                ctx.groupState = { field: group };
+                markActiveGroup(option);
+            }
+            refresh();
+            if (ctx.currentView === "trend" && ctx.renderTrend) {
+                ctx.renderTrend();
+            }
+            if (ctx.closeMenus) {
+                ctx.closeMenus();
+            }
+        });
+    });
+
+    const columnToggles = Array.from(
+        shadowRoot.querySelectorAll(".skore-summary-column-toggle")
+    );
+    columnToggles.forEach((toggle) => {
+        const index = toggle.dataset.columnIndex;
+        setColumnVisible(index, toggle.checked);
+        toggle.addEventListener("change", () => {
+            setColumnVisible(index, toggle.checked);
+        });
+    });
+
+    ctx.currentSearchTerm = currentSearchTerm;
+    ctx.collectCheckboxFilters = collectCheckboxFilters;
+    ctx.passesCheckboxFilters = passesCheckboxFilters;
+    ctx.passesDateRange = passesDateRange;
+    ctx.rowMatchesSearch = rowMatchesSearch;
+    ctx.groupInfo = groupInfo;
+    ctx.groupPrefix = groupPrefix;
+    ctx.cellAt = cellAt;
+    ctx.headerAt = headerAt;
+    ctx.refresh = refresh;
+}
+function setupPlot(ctx) {
+    const { shadowRoot, dataRows } = ctx;
+    const plotArea = ctx.plotArea;
+    const plotEmpty = ctx.plotEmpty;
+    const colorSelect = ctx.colorSelect;
+
+    ctx.numericColumns = [];
+    shadowRoot.querySelectorAll("thead th.summary-sortable").forEach((header) => {
+        if (
+            header.dataset.sortKind === "number" &&
+            header.dataset.columnRole !== "std"
+        ) {
+            const label = header.querySelector(".summary-th-label");
+            ctx.numericColumns.push({
+                index: parseInt(header.dataset.columnIndex, 10),
+                key: header.dataset.columnKey,
+                label: label ? label.textContent : header.textContent,
+            });
+        }
+    });
+
+    ctx.keyToIndex = {};
+    ctx.numericColumns.forEach((column) => {
+        ctx.keyToIndex[column.key] = column.index;
+    });
+
+    function rowMatchesBrushes(row) {
+        for (const key in ctx.brushes) {
+            const value = parseFloat(ctx.cellAt(row, ctx.keyToIndex[key]).dataset.sort);
+            const brush = ctx.brushes[key];
+            if (Number.isNaN(value) || value < brush.low || value > brush.high) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    function applyBrushSelection() {
+        ctx.selectedIds.clear();
+        if (Object.keys(ctx.brushes).length === 0) {
+            return;
+        }
+        const activeByField = ctx.collectCheckboxFilters();
+        const term = ctx.currentSearchTerm();
+        dataRows.forEach((row) => {
+            const checkbox = row.querySelector(".skore-summary-row");
+            if (!checkbox) {
+                return;
+            }
+            if (
+                !ctx.passesCheckboxFilters(row, activeByField) ||
+                !ctx.passesDateRange(row) ||
+                !ctx.rowMatchesSearch(row, term)
+            ) {
+                return;
+            }
+            if (rowMatchesBrushes(row)) {
+                ctx.selectedIds.add(checkbox.dataset.id);
+            }
+        });
+    }
+
+    if (colorSelect) {
+        ctx.numericColumns.forEach((column, i) => {
+            const option = document.createElement("option");
+            option.value = String(i);
+            option.textContent = column.label;
+            colorSelect.appendChild(option);
+        });
+    }
+
+    function renderPlot() {
+        if (!plotArea) {
+            return;
+        }
+        if (ctx.numericColumns.length < 2) {
+            if (plotEmpty) {
+                plotEmpty.hidden = false;
+            }
+            plotArea.replaceChildren();
+            return;
+        }
+        if (plotEmpty) {
+            plotEmpty.hidden = true;
+        }
+
+        const width = plotArea.clientWidth || 600;
+        const height = 360;
+        const margin = { top: 30, right: 24, bottom: 28, left: 24 };
+        const innerW = Math.max(1, width - margin.left - margin.right);
+        const innerH = Math.max(1, height - margin.top - margin.bottom);
+
+        const axes = ctx.numericColumns.map((column) => {
+            let min = Infinity;
+            let max = -Infinity;
+            dataRows.forEach((row) => {
+                const value = parseFloat(ctx.cellAt(row, column.index).dataset.sort);
+                if (!Number.isNaN(value)) {
+                    if (value < min) min = value;
+                    if (value > max) max = value;
+                }
+            });
+            if (min === Infinity) {
+                min = 0;
+                max = 1;
+            } else if (min === max) {
+                min -= 0.5;
+                max += 0.5;
+            }
+            return { index: column.index, key: column.key, label: column.label, min, max };
+        });
+
+        const axisX = (i) => (innerW * i) / (axes.length - 1);
+        const valueY = (axis, value) =>
+            innerH - ((value - axis.min) / (axis.max - axis.min)) * innerH;
+        const valueFromY = (axis, y) =>
+            axis.min + ((innerH - y) / innerH) * (axis.max - axis.min);
+
+        function plotYFromEvent(evt) {
+            const point = svg.createSVGPoint();
+            point.x = evt.clientX;
+            point.y = evt.clientY;
+            const ctm = svg.getScreenCTM();
+            if (!ctm) {
+                return 0;
+            }
+            const local = point.matrixTransform(ctm.inverse());
+            return Math.min(innerH, Math.max(0, local.y - margin.top));
+        }
+
+        const hasSelection = ctx.selectedIds.size > 0;
+
+        const activeByField = ctx.collectCheckboxFilters();
+        const term = ctx.currentSearchTerm();
+        function rowVisible(row) {
+            return (
+                ctx.passesCheckboxFilters(row, activeByField) &&
+                ctx.passesDateRange(row) &&
+                ctx.rowMatchesSearch(row, term)
+            );
+        }
+
+        const colorIndex = colorSelect ? parseInt(colorSelect.value, 10) || 0 : 0;
+        const colorAxis = axes[Math.min(colorIndex, axes.length - 1)];
+
+        const svg = document.createElementNS(SVG_NS, "svg");
+        svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+        const plotG = document.createElementNS(SVG_NS, "g");
+        plotG.setAttribute(
+            "transform",
+            "translate(" + margin.left + ", " + margin.top + ")"
+        );
+        svg.appendChild(plotG);
+
+        dataRows.forEach((row) => {
+            if (!rowVisible(row)) {
+                return;
+            }
+            const checkbox = row.querySelector(".skore-summary-row");
+            const colorValue = parseFloat(ctx.cellAt(row, colorAxis.index).dataset.sort);
+            const t = (colorValue - colorAxis.min) / (colorAxis.max - colorAxis.min);
+
+            let d = "";
+            let penDown = false;
+            axes.forEach((axis, i) => {
+                const value = parseFloat(ctx.cellAt(row, axis.index).dataset.sort);
+                if (Number.isNaN(value)) {
+                    penDown = false;
+                    return;
+                }
+                d += (penDown ? " L" : " M") + axisX(i) + " " + valueY(axis, value);
+                penDown = true;
+            });
+            if (!d) {
+                return;
+            }
+
+            const path = document.createElementNS(SVG_NS, "path");
+            const selectedRow = checkbox && ctx.selectedIds.has(checkbox.dataset.id);
+            const dim = hasSelection && !selectedRow;
+            path.setAttribute(
+                "class",
+                dim ? "summary-plot-line summary-plot-line--dim" : "summary-plot-line"
+            );
+            path.setAttribute("d", d.trim());
+            path.setAttribute(
+                "stroke",
+                colorFor(Number.isNaN(colorValue) ? NaN : t, ctx.container)
+            );
+            const title = document.createElementNS(SVG_NS, "title");
+            title.textContent = checkbox ? checkbox.dataset.id : "";
+            path.appendChild(title);
+            plotG.appendChild(path);
+        });
+
+        axes.forEach((axis, i) => {
+            const x = axisX(i);
+            const anchor = anchorFor(i, axes.length);
+            const line = document.createElementNS(SVG_NS, "line");
+            line.setAttribute("class", "summary-plot-axis-line");
+            line.setAttribute("x1", x);
+            line.setAttribute("y1", 0);
+            line.setAttribute("x2", x);
+            line.setAttribute("y2", innerH);
+            plotG.appendChild(line);
+
+            appendText(plotG, "summary-plot-axis-label", x, -12, anchor, axis.label);
+            appendText(plotG, "summary-plot-tick", x, -2, anchor, formatTick(axis.max));
+            appendText(
+                plotG,
+                "summary-plot-tick",
+                x,
+                innerH + 14,
+                anchor,
+                formatTick(axis.min)
+            );
+
+            const brush = ctx.brushes[axis.key];
+            if (brush) {
+                const top = valueY(axis, brush.high);
+                const bottom = valueY(axis, brush.low);
+                const rect = document.createElementNS(SVG_NS, "rect");
+                rect.setAttribute("class", "summary-plot-brush");
+                rect.setAttribute("x", x - 8);
+                rect.setAttribute("width", 16);
+                rect.setAttribute("y", top);
+                rect.setAttribute("height", Math.max(0, bottom - top));
+                plotG.appendChild(rect);
+            }
+
+            const track = document.createElementNS(SVG_NS, "rect");
+            track.setAttribute("class", "summary-plot-brush-track");
+            track.setAttribute("x", x - 8);
+            track.setAttribute("width", 16);
+            track.setAttribute("y", 0);
+            track.setAttribute("height", innerH);
+            plotG.appendChild(track);
+
+            let dragStartY = null;
+            let liveRect = null;
+            track.addEventListener("pointerdown", (evt) => {
+                evt.preventDefault();
+                track.setPointerCapture(evt.pointerId);
+                dragStartY = plotYFromEvent(evt);
+                liveRect = document.createElementNS(SVG_NS, "rect");
+                liveRect.setAttribute("class", "summary-plot-brush");
+                liveRect.setAttribute("x", x - 8);
+                liveRect.setAttribute("width", 16);
+                liveRect.setAttribute("y", dragStartY);
+                liveRect.setAttribute("height", 0);
+                plotG.appendChild(liveRect);
+            });
+            track.addEventListener("pointermove", (evt) => {
+                if (dragStartY === null) {
+                    return;
+                }
+                const y = plotYFromEvent(evt);
+                const top = Math.min(dragStartY, y);
+                liveRect.setAttribute("y", top);
+                liveRect.setAttribute("height", Math.abs(y - dragStartY));
+            });
+            track.addEventListener("pointerup", (evt) => {
+                if (dragStartY === null) {
+                    return;
+                }
+                const y = plotYFromEvent(evt);
+                const top = Math.min(dragStartY, y);
+                const bottom = Math.max(dragStartY, y);
+                dragStartY = null;
+                if (bottom - top < 3) {
+                    delete ctx.brushes[axis.key];
+                } else {
+                    ctx.brushes[axis.key] = {
+                        low: valueFromY(axis, bottom),
+                        high: valueFromY(axis, top),
+                    };
+                }
+                applyBrushSelection();
+                ctx.syncCheckboxes();
+                renderPlot();
+                ctx.updateQuery();
+            });
+        });
+
+        plotArea.replaceChildren(svg);
+    }
+
+    ctx.applyBrushSelection = applyBrushSelection;
+    ctx.renderPlot = renderPlot;
+}
+function trendPalette(container) {
+    const blue = themeColor(container, "--color-blue", [48, 67, 240]);
+    const orange = themeColor(container, "--color-orange", [249, 115, 22]);
+    const toRgb = (c) => "rgb(" + c[0] + ", " + c[1] + ", " + c[2] + ")";
+    return [
+        toRgb(blue),
+        toRgb(orange),
+        "rgb(27, 158, 119)",
+        "rgb(180, 4, 38)",
+        "rgb(117, 112, 179)",
+        "rgb(8, 145, 178)",
+        "rgb(102, 102, 102)",
+    ];
+}
+
+function setupTrend(ctx) {
+    const { dataRows } = ctx;
+    const trendArea = ctx.trendArea;
+    const trendEmpty = ctx.trendEmpty;
+    const trendUndatedEmpty = ctx.trendUndatedEmpty;
+    const trendMetricSelect = ctx.trendMetricSelect;
+
+    if (trendMetricSelect) {
+        ctx.numericColumns.forEach((column, i) => {
+            const option = document.createElement("option");
+            option.value = String(i);
+            option.textContent = column.label;
+            trendMetricSelect.appendChild(option);
+        });
+    }
+
+    function datedRowsSorted() {
+        return dataRows
+            .map((row) => ({ row, time: new Date(row.dataset.date || "").getTime() }))
+            .filter((entry) => entry.row.dataset.date && !Number.isNaN(entry.time))
+            .sort((a, b) => a.time - b.time)
+            .map((entry) => entry.row);
+    }
+
+    function trendMetric() {
+        if (ctx.numericColumns.length === 0) {
+            return null;
+        }
+        const idx = trendMetricSelect ? parseInt(trendMetricSelect.value, 10) || 0 : 0;
+        return ctx.numericColumns[Math.min(idx, ctx.numericColumns.length - 1)];
+    }
+
+    function applyTrendSelection() {
+        ctx.selectedIds.clear();
+        if (!ctx.trendXBrush && !ctx.trendYBrush) {
+            return;
+        }
+        const metric = trendMetric();
+        const activeByField = ctx.collectCheckboxFilters();
+        const term = ctx.currentSearchTerm();
+        const ordered = datedRowsSorted();
+        ordered.forEach((row, i) => {
+            const checkbox = row.querySelector(".skore-summary-row");
+            if (!checkbox) {
+                return;
+            }
+            if (
+                !ctx.passesCheckboxFilters(row, activeByField) ||
+                !ctx.passesDateRange(row) ||
+                !ctx.rowMatchesSearch(row, term)
+            ) {
+                return;
+            }
+            if (ctx.trendXBrush && (i < ctx.trendXBrush.low || i > ctx.trendXBrush.high)) {
+                return;
+            }
+            if (ctx.trendYBrush && metric) {
+                const value = parseFloat(ctx.cellAt(row, metric.index).dataset.sort);
+                if (
+                    Number.isNaN(value) ||
+                    value < ctx.trendYBrush.low ||
+                    value > ctx.trendYBrush.high
+                ) {
+                    return;
+                }
+            }
+            ctx.selectedIds.add(checkbox.dataset.id);
+        });
+    }
+
+    function renderTrend() {
+        if (!trendArea) {
+            return;
+        }
+        const metric = trendMetric();
+        if (!metric) {
+            if (trendEmpty) {
+                trendEmpty.hidden = false;
+            }
+            if (trendUndatedEmpty) {
+                trendUndatedEmpty.hidden = true;
+            }
+            trendArea.replaceChildren();
+            return;
+        }
+
+        const ordered = datedRowsSorted();
+        if (ordered.length === 0) {
+            ctx.trendXBrush = null;
+            ctx.trendYBrush = null;
+            if (trendEmpty) {
+                trendEmpty.hidden = true;
+            }
+            if (trendUndatedEmpty) {
+                trendUndatedEmpty.hidden = false;
+            }
+            trendArea.replaceChildren();
+            return;
+        }
+        if (trendEmpty) {
+            trendEmpty.hidden = true;
+        }
+        if (trendUndatedEmpty) {
+            trendUndatedEmpty.hidden = true;
+        }
+
+        const indexOf = new Map();
+        ordered.forEach((row, i) => indexOf.set(row, i));
+
+        const width = trendArea.clientWidth || 600;
+        const height = 360;
+        const margin = { top: 24, right: 24, bottom: 56, left: 60 };
+        const innerW = Math.max(1, width - margin.left - margin.right);
+        const innerH = Math.max(1, height - margin.top - margin.bottom);
+
+        let min = Infinity;
+        let max = -Infinity;
+        ordered.forEach((row) => {
+            const cell = ctx.cellAt(row, metric.index);
+            const value = parseFloat(cell.dataset.sort);
+            if (Number.isNaN(value)) {
+                return;
+            }
+            const stdRaw = cell.dataset.std;
+            const std = stdRaw ? parseFloat(stdRaw) : NaN;
+            const lo = Number.isFinite(std) ? value - std : value;
+            const hi = Number.isFinite(std) ? value + std : value;
+            if (lo < min) {
+                min = lo;
+            }
+            if (hi > max) {
+                max = hi;
+            }
+        });
+        if (min === Infinity) {
+            min = 0;
+            max = 1;
+        } else if (min === max) {
+            min -= 0.5;
+            max += 0.5;
+        }
+
+        const n = ordered.length;
+        const xPad = n <= 1 ? 0 : Math.min(24, innerW * 0.06);
+        const yPad = Math.min(16, innerH * 0.06);
+        const xSpan = Math.max(1, innerW - 2 * xPad);
+        const ySpan = Math.max(1, innerH - 2 * yPad);
+        const xAt = (i) => (n <= 1 ? innerW / 2 : xPad + (xSpan * i) / (n - 1));
+        const indexFromX = (x) => {
+            if (n <= 1) {
+                return 0;
+            }
+            const clamped = Math.min(xPad + xSpan, Math.max(xPad, x));
+            return Math.round(((clamped - xPad) / xSpan) * (n - 1));
+        };
+        const valueY = (value) => innerH - yPad - ((value - min) / (max - min)) * ySpan;
+        const valueFromY = (y) => min + ((innerH - yPad - y) / ySpan) * (max - min);
+
+        const activeByField = ctx.collectCheckboxFilters();
+        const term = ctx.currentSearchTerm();
+        function rowVisible(row) {
+            return (
+                ctx.passesCheckboxFilters(row, activeByField) &&
+                ctx.passesDateRange(row) &&
+                ctx.rowMatchesSearch(row, term)
+            );
+        }
+
+        const hasSelection = ctx.selectedIds.size > 0;
+
+        const groups = [];
+        const byKey = new Map();
+        ordered.forEach((row) => {
+            if (!rowVisible(row)) {
+                return;
+            }
+            const cell = ctx.cellAt(row, metric.index);
+            const value = parseFloat(cell.dataset.sort);
+            if (Number.isNaN(value)) {
+                return;
+            }
+            const stdRaw = cell.dataset.std;
+            const std = stdRaw ? parseFloat(stdRaw) : NaN;
+            const info = ctx.groupState
+                ? ctx.groupInfo(row)
+                : { key: "__all__", label: "" };
+            let group = byKey.get(info.key);
+            if (!group) {
+                group = { label: info.label, points: [] };
+                byKey.set(info.key, group);
+                groups.push(group);
+            }
+            const checkbox = row.querySelector(".skore-summary-row");
+            group.points.push({
+                x: xAt(indexOf.get(row)),
+                y: valueY(value),
+                id: checkbox ? checkbox.dataset.id : "",
+                key: row.dataset.key || "",
+                value,
+                std,
+            });
+        });
+
+        const svg = document.createElementNS(SVG_NS, "svg");
+        svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+        const plotG = document.createElementNS(SVG_NS, "g");
+        plotG.setAttribute(
+            "transform",
+            "translate(" + margin.left + ", " + margin.top + ")"
+        );
+        svg.appendChild(plotG);
+
+        function localPoint(evt) {
+            const point = svg.createSVGPoint();
+            point.x = evt.clientX;
+            point.y = evt.clientY;
+            const ctm = svg.getScreenCTM();
+            if (!ctm) {
+                return { x: 0, y: 0 };
+            }
+            const local = point.matrixTransform(ctm.inverse());
+            return { x: local.x - margin.left, y: local.y - margin.top };
+        }
+
+        const tooltip = document.createElement("div");
+        tooltip.className = "summary-trend-tooltip";
+        tooltip.hidden = true;
+
+        function setTooltipContent(id, key, value, std) {
+            const idLine = document.createElement("div");
+            idLine.textContent = "ID: " + middleEllipsis(id);
+            const keyLine = document.createElement("div");
+            keyLine.textContent = "Key: " + key;
+            const valueLine = document.createElement("div");
+            const text = formatTick(value);
+            valueLine.textContent =
+                metric.label +
+                ": " +
+                (Number.isFinite(std) && std > 0
+                    ? text + " \u00b1 " + formatTick(std)
+                    : text);
+            tooltip.replaceChildren(idLine, keyLine, valueLine);
+        }
+
+        function positionTooltip(evt) {
+            const rect = trendArea.getBoundingClientRect();
+            tooltip.style.left = evt.clientX - rect.left + 12 + "px";
+            tooltip.style.top = evt.clientY - rect.top + 12 + "px";
+        }
+
+        const yAxis = document.createElementNS(SVG_NS, "line");
+        yAxis.setAttribute("class", "summary-plot-axis-line");
+        yAxis.setAttribute("x1", 0);
+        yAxis.setAttribute("y1", 0);
+        yAxis.setAttribute("x2", 0);
+        yAxis.setAttribute("y2", innerH);
+        plotG.appendChild(yAxis);
+
+        const xAxis = document.createElementNS(SVG_NS, "line");
+        xAxis.setAttribute("class", "summary-plot-axis-line");
+        xAxis.setAttribute("x1", 0);
+        xAxis.setAttribute("y1", innerH);
+        xAxis.setAttribute("x2", innerW);
+        xAxis.setAttribute("y2", innerH);
+        plotG.appendChild(xAxis);
+
+        appendText(plotG, "summary-plot-axis-label", 0, -10, "start", metric.label);
+        appendText(plotG, "summary-plot-tick", -8, valueY(max) + 4, "end", formatTick(max));
+        appendText(plotG, "summary-plot-tick", -8, valueY(min), "end", formatTick(min));
+
+        if (n > 0) {
+            const tickCount = Math.min(n, 5);
+            for (let t = 0; t < tickCount; t += 1) {
+                const i = tickCount === 1 ? 0 : Math.round((t * (n - 1)) / (tickCount - 1));
+                const row = ordered[i];
+                const date = new Date(row.dataset.date);
+                const label = Number.isNaN(date.getTime())
+                    ? row.dataset.date
+                    : formatBucket(date, "minute");
+                const x = xAt(i);
+                const node = document.createElementNS(SVG_NS, "text");
+                node.setAttribute("class", "summary-plot-tick");
+                node.setAttribute("x", x);
+                node.setAttribute("y", innerH + 8);
+                node.setAttribute("text-anchor", "end");
+                node.setAttribute("transform", "rotate(-30 " + x + " " + (innerH + 8) + ")");
+                node.textContent = label;
+                plotG.appendChild(node);
+            }
+        }
+
+        const palette = trendPalette(ctx.container);
+
+        groups.forEach((group, gi) => {
+            const color = ctx.groupState
+                ? palette[gi % palette.length]
+                : palette[0];
+            if (group.points.length > 1) {
+                let d = "";
+                group.points.forEach((pt, i) => {
+                    d += (i === 0 ? "M" : " L") + pt.x + " " + pt.y;
+                });
+                const lineSelected = group.points.some((pt) => ctx.selectedIds.has(pt.id));
+                const path = document.createElementNS(SVG_NS, "path");
+                path.setAttribute(
+                    "class",
+                    hasSelection && !lineSelected
+                        ? "summary-trend-line summary-trend-line--dim"
+                        : "summary-trend-line"
+                );
+                path.setAttribute("d", d);
+                path.setAttribute("stroke", color);
+                plotG.appendChild(path);
+            }
+            group.points.forEach((pt) => {
+                const selected = ctx.selectedIds.has(pt.id);
+                const dim = hasSelection && !selected;
+                if (Number.isFinite(pt.std) && pt.std > 0) {
+                    const yTop = valueY(pt.value + pt.std);
+                    const yBot = valueY(pt.value - pt.std);
+                    const capW = 4;
+                    appendLine(plotG, pt.x, yTop, pt.x, yBot, color, "summary-trend-errorbar");
+                    appendLine(
+                        plotG,
+                        pt.x - capW,
+                        yTop,
+                        pt.x + capW,
+                        yTop,
+                        color,
+                        "summary-trend-errorbar"
+                    );
+                    appendLine(
+                        plotG,
+                        pt.x - capW,
+                        yBot,
+                        pt.x + capW,
+                        yBot,
+                        color,
+                        "summary-trend-errorbar"
+                    );
+                }
+                const circle = document.createElementNS(SVG_NS, "circle");
+                circle.setAttribute(
+                    "class",
+                    dim ? "summary-trend-point summary-trend-point--dim" : "summary-trend-point"
+                );
+                circle.setAttribute("cx", pt.x);
+                circle.setAttribute("cy", pt.y);
+                circle.setAttribute("r", 4);
+                circle.setAttribute("fill", color);
+                circle.addEventListener("mouseenter", (evt) => {
+                    circle.setAttribute("r", 6);
+                    circle.classList.add("summary-trend-point--hover");
+                    setTooltipContent(pt.id, pt.key, pt.value, pt.std);
+                    tooltip.hidden = false;
+                    positionTooltip(evt);
+                });
+                circle.addEventListener("mousemove", positionTooltip);
+                circle.addEventListener("mouseleave", () => {
+                    circle.setAttribute("r", 4);
+                    circle.classList.remove("summary-trend-point--hover");
+                    tooltip.hidden = true;
+                });
+                plotG.appendChild(circle);
+            });
+        });
+
+        const eps = (max - min) * 1e-9 || 1e-9;
+        let xLow = ctx.trendXBrush ? ctx.trendXBrush.low : 0;
+        let xHigh = ctx.trendXBrush ? ctx.trendXBrush.high : n - 1;
+        let yHighVal = ctx.trendYBrush ? ctx.trendYBrush.high : max;
+        let yLowVal = ctx.trendYBrush ? ctx.trendYBrush.low : min;
+
+        function commitX() {
+            ctx.trendXBrush =
+                xLow <= 0 && xHigh >= n - 1 ? null : { low: xLow, high: xHigh };
+        }
+
+        function commitY() {
+            ctx.trendYBrush =
+                yLowVal <= min + eps && yHighVal >= max - eps
+                    ? null
+                    : { low: yLowVal, high: yHighVal };
+        }
+
+        function makeCursor(orientation, read, write, commit) {
+            const line = document.createElementNS(SVG_NS, "line");
+            line.setAttribute("class", "summary-trend-cursor");
+
+            const handle = document.createElementNS(SVG_NS, "g");
+            handle.setAttribute(
+                "class",
+                "summary-trend-grip summary-trend-grip--" + orientation
+            );
+            const grip = document.createElementNS(SVG_NS, "rect");
+            grip.setAttribute("class", "summary-trend-grip-box");
+            grip.setAttribute("rx", 3);
+            const arrow = document.createElementNS(SVG_NS, "text");
+            arrow.setAttribute("class", "summary-trend-grip-arrow");
+            arrow.setAttribute("text-anchor", "middle");
+            arrow.setAttribute("dominant-baseline", "central");
+            arrow.textContent = orientation === "x" ? "\u2194" : "\u2195";
+            handle.appendChild(grip);
+            handle.appendChild(arrow);
+
+            function place() {
+                if (orientation === "x") {
+                    const x = xAt(read());
+                    line.setAttribute("x1", x);
+                    line.setAttribute("y1", 0);
+                    line.setAttribute("x2", x);
+                    line.setAttribute("y2", innerH);
+                    grip.setAttribute("x", x - 11);
+                    grip.setAttribute("y", -7);
+                    grip.setAttribute("width", 22);
+                    grip.setAttribute("height", 14);
+                    arrow.setAttribute("x", x);
+                    arrow.setAttribute("y", 0);
+                } else {
+                    const y = valueY(read());
+                    line.setAttribute("x1", 0);
+                    line.setAttribute("y1", y);
+                    line.setAttribute("x2", innerW);
+                    line.setAttribute("y2", y);
+                    grip.setAttribute("x", -8);
+                    grip.setAttribute("y", y - 11);
+                    grip.setAttribute("width", 16);
+                    grip.setAttribute("height", 22);
+                    arrow.setAttribute("x", 0);
+                    arrow.setAttribute("y", y);
+                }
+            }
+            place();
+
+            let dragging = false;
+            handle.addEventListener("pointerdown", (evt) => {
+                evt.preventDefault();
+                handle.setPointerCapture(evt.pointerId);
+                dragging = true;
+            });
+            handle.addEventListener("pointermove", (evt) => {
+                if (!dragging) {
+                    return;
+                }
+                const local = localPoint(evt);
+                if (orientation === "x") {
+                    write(indexFromX(local.x));
+                } else {
+                    const clampedY = Math.min(innerH, Math.max(0, local.y));
+                    write(valueFromY(clampedY));
+                }
+                place();
+            });
+            function end() {
+                if (!dragging) {
+                    return;
+                }
+                dragging = false;
+                commit();
+                applyTrendSelection();
+                ctx.syncCheckboxes();
+                renderTrend();
+                ctx.updateQuery();
+            }
+            handle.addEventListener("pointerup", end);
+            handle.addEventListener("pointercancel", end);
+
+            plotG.appendChild(line);
+            plotG.appendChild(handle);
+        }
+
+        makeCursor(
+            "x",
+            () => xLow,
+            (idx) => {
+                xLow = Math.max(0, Math.min(idx, xHigh));
+            },
+            commitX
+        );
+        makeCursor(
+            "x",
+            () => xHigh,
+            (idx) => {
+                xHigh = Math.min(n - 1, Math.max(idx, xLow));
+            },
+            commitX
+        );
+        makeCursor(
+            "y",
+            () => yHighVal,
+            (value) => {
+                yHighVal = Math.min(max, Math.max(value, yLowVal));
+            },
+            commitY
+        );
+        makeCursor(
+            "y",
+            () => yLowVal,
+            (value) => {
+                yLowVal = Math.max(min, Math.min(value, yHighVal));
+            },
+            commitY
+        );
+
+        trendArea.replaceChildren(svg, tooltip);
+    }
+
+    ctx.applyTrendSelection = applyTrendSelection;
+    ctx.renderTrend = renderTrend;
+}
+function skoreInitSummary(containerId) {
+    const wrapper = document.getElementById(containerId + "-wrapper");
+    const host = document.getElementById(containerId);
+    if (!wrapper || !host) {
+        return;
+    }
+
+    const template = document.getElementById(containerId + "-template");
+    if (!template) {
+        return;
+    }
+
+    const shadowRoot = host.attachShadow({ mode: "closed" });
+    shadowRoot.appendChild(template.content.cloneNode(true));
+
+    const container = shadowRoot.querySelector(".container");
+    if (container) {
+        applyThemeToReportContainer(container, containerId + "-wrapper");
+    }
+
+    const table = shadowRoot.querySelector(".summary-table");
+    if (!table) {
+        return;
+    }
+
+    const tbody = table.querySelector("tbody");
+    const dataRows = Array.from(tbody.querySelectorAll("tr"));
+
+    const ctx = {
+        shadowRoot,
+        container,
+        table,
+        tbody,
+        dataRows,
+        queryBox: shadowRoot.querySelector(".skore-summary-query"),
+        copyButton: shadowRoot.querySelector(".skore-summary-copy"),
+        searchInput: shadowRoot.querySelector(".skore-summary-search-input"),
+        dateStart: shadowRoot.querySelector(".skore-summary-date-start"),
+        dateEnd: shadowRoot.querySelector(".skore-summary-date-end"),
+        filterValues: shadowRoot.querySelectorAll(".skore-summary-filter-value"),
+        groupN: shadowRoot.querySelector(".skore-summary-group-n"),
+        groupUnit: shadowRoot.querySelector(".skore-summary-group-unit"),
+        groupOptions: shadowRoot.querySelectorAll(".skore-summary-group-option"),
+        plotArea: shadowRoot.querySelector(".summary-plot"),
+        plotEmpty: shadowRoot.querySelector(".summary-plot-empty"),
+        colorSelect: shadowRoot.querySelector(".skore-summary-color-metric"),
+        trendArea: shadowRoot.querySelector(".summary-trend"),
+        trendEmpty: shadowRoot.querySelector(".summary-trend-empty"),
+        trendUndatedEmpty: shadowRoot.querySelector(".summary-trend-undated-empty"),
+        trendMetricSelect: shadowRoot.querySelector(".skore-summary-trend-metric"),
+        viewButtons: shadowRoot.querySelectorAll(".summary-view-btn"),
+        selectedIds: new Set(),
+        sortState: null,
+        groupState: null,
+        brushes: {},
+        trendXBrush: null,
+        trendYBrush: null,
+        currentView: "table",
+        queryIsEmpty: true,
+        numericColumns: [],
+        keyToIndex: {},
+    };
+
+    const filterToggle = shadowRoot.querySelector(".skore-summary-filter-toggle");
+    const filterPanel = shadowRoot.querySelector(".skore-summary-filter-panel");
+    const groupToggle = shadowRoot.querySelector(".skore-summary-groupby-toggle");
+    const groupPanel = shadowRoot.querySelector(".skore-summary-groupby-panel");
+    const columnsToggle = shadowRoot.querySelector(".skore-summary-columns-toggle");
+    const columnsPanel = shadowRoot.querySelector(".skore-summary-columns-panel");
+
+    const popovers = [
+        [filterToggle, filterPanel],
+        [groupToggle, groupPanel],
+        [columnsToggle, columnsPanel],
+    ];
+
+    function setPanel(toggle, panel, open) {
+        if (!toggle || !panel) {
+            return;
+        }
+        if (open) {
+            panel.removeAttribute("hidden");
+            toggle.setAttribute("aria-expanded", "true");
+        } else {
+            panel.setAttribute("hidden", "");
+            toggle.setAttribute("aria-expanded", "false");
+        }
+    }
+
+    ctx.closeMenus = function closeMenus() {
+        popovers.forEach(([toggle, panel]) => setPanel(toggle, panel, false));
+    };
+
+    function wireToggle(toggle, panel) {
+        if (!toggle || !panel) {
+            return;
+        }
+        toggle.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const willOpen = panel.hasAttribute("hidden");
+            ctx.closeMenus();
+            setPanel(toggle, panel, willOpen);
+        });
+        panel.addEventListener("click", (event) => event.stopPropagation());
+    }
+
+    popovers.forEach(([toggle, panel]) => wireToggle(toggle, panel));
+    shadowRoot.addEventListener("click", ctx.closeMenus);
+
+    setupTable(ctx);
+    setupPlot(ctx);
+    setupTrend(ctx);
+
+    ctx.clearBrushes = function clearBrushes() {
+        for (const key in ctx.brushes) {
+            delete ctx.brushes[key];
+        }
+        ctx.trendXBrush = null;
+        ctx.trendYBrush = null;
+    };
+
+    function emptyMessage() {
+        if (ctx.currentView === "plot") {
+            return "Brush an axis to select reports.";
+        }
+        if (ctx.currentView === "trend") {
+            return "Drag the range cursors to select reports.";
+        }
+        return ctx.queryBox ? ctx.queryBox.dataset.empty : "";
+    }
+
+    function setQuery(text, isEmpty) {
+        if (!ctx.queryBox) {
+            return;
+        }
+        ctx.queryIsEmpty = isEmpty;
+        ctx.queryBox.textContent = isEmpty ? emptyMessage() : text;
+    }
+
+    ctx.updateQuery = function updateQuery() {
+        const ids = [];
+        dataRows.forEach((row) => {
+            const checkbox = row.querySelector(".skore-summary-row");
+            if (checkbox && ctx.selectedIds.has(checkbox.dataset.id)) {
+                ids.push(checkbox.dataset.id);
+            }
+        });
+        if (ids.length === 0) {
+            setQuery("", true);
+            return;
+        }
+        const formatted = ids.map((id) => "'" + id + "'").join(", ");
+        setQuery('"id in [' + formatted + ']"', false);
+    };
+
+    ctx.syncCheckboxes = function syncCheckboxes() {
+        shadowRoot.querySelectorAll(".skore-summary-row").forEach((checkbox) => {
+            checkbox.checked = ctx.selectedIds.has(checkbox.dataset.id);
+        });
+    };
+
+    let lastClickedRow = null;
+
+    shadowRoot.querySelectorAll(".skore-summary-row").forEach((checkbox) => {
+        checkbox.addEventListener("mousedown", (event) => {
+            if (event.shiftKey) {
+                event.preventDefault();
+            }
+        });
+        checkbox.addEventListener("click", (event) => {
+            if (event.shiftKey && lastClickedRow && lastClickedRow !== checkbox) {
+                const visibleCheckboxes = Array.from(
+                    tbody.querySelectorAll(".skore-summary-row")
+                ).filter((cb) => {
+                    const tr = cb.closest("tr");
+                    return tr && tr.style.display !== "none";
+                });
+                const current = visibleCheckboxes.indexOf(checkbox);
+                const anchor = visibleCheckboxes.indexOf(lastClickedRow);
+                if (current >= 0 && anchor >= 0) {
+                    const lo = Math.min(current, anchor);
+                    const hi = Math.max(current, anchor);
+                    const target = checkbox.checked;
+                    for (let i = lo; i <= hi; i++) {
+                        visibleCheckboxes[i].checked = target;
+                    }
+                }
+            }
+            ctx.selectedIds.clear();
+            shadowRoot.querySelectorAll(".skore-summary-row").forEach((cb) => {
+                if (cb.checked) {
+                    ctx.selectedIds.add(cb.dataset.id);
+                }
+            });
+            ctx.clearBrushes();
+            ctx.updateQuery();
+            lastClickedRow = checkbox;
+        });
+    });
+
+    if (ctx.copyButton && ctx.queryBox) {
+        ctx.copyButton.addEventListener("click", () => {
+            if (ctx.queryIsEmpty || !navigator.clipboard) {
+                return;
+            }
+            navigator.clipboard.writeText(ctx.queryBox.textContent);
+        });
+    }
+
+    const clearButton = shadowRoot.querySelector(".skore-summary-clear");
+    if (clearButton) {
+        clearButton.addEventListener("click", () => {
+            ctx.selectedIds.clear();
+            ctx.clearBrushes();
+            ctx.syncCheckboxes();
+            if (ctx.currentView === "plot") {
+                ctx.renderPlot();
+            } else if (ctx.currentView === "trend") {
+                ctx.renderTrend();
+            }
+            ctx.updateQuery();
+        });
+    }
+
+    function setView(view) {
+        ctx.currentView = view;
+        if (container) {
+            container.dataset.view = view;
+        }
+        ctx.viewButtons.forEach((button) => {
+            const active = button.dataset.view === view;
+            button.classList.toggle("summary-view-btn--active", active);
+            button.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+        if (view === "plot") {
+            ctx.renderPlot();
+        } else if (view === "trend") {
+            ctx.renderTrend();
+        } else {
+            ctx.syncCheckboxes();
+        }
+        ctx.updateQuery();
+    }
+
+    ctx.viewButtons.forEach((button) => {
+        button.addEventListener("click", () => setView(button.dataset.view));
+    });
+
+    if (ctx.colorSelect) {
+        ctx.colorSelect.addEventListener("change", () => {
+            if (ctx.currentView === "plot") {
+                ctx.renderPlot();
+            }
+        });
+    }
+
+    if (ctx.trendMetricSelect) {
+        ctx.trendMetricSelect.addEventListener("change", () => {
+            if (ctx.currentView !== "trend") {
+                return;
+            }
+            ctx.trendYBrush = null;
+            ctx.applyTrendSelection();
+            ctx.syncCheckboxes();
+            ctx.updateQuery();
+            ctx.renderTrend();
+        });
+    }
+
+    if (typeof ResizeObserver !== "undefined") {
+        if (ctx.plotArea) {
+            const observer = new ResizeObserver(() => {
+                if (ctx.currentView === "plot") {
+                    ctx.renderPlot();
+                }
+            });
+            observer.observe(ctx.plotArea);
+        }
+        if (ctx.trendArea) {
+            const observer = new ResizeObserver(() => {
+                if (ctx.currentView === "trend") {
+                    ctx.renderTrend();
+                }
+            });
+            observer.observe(ctx.trendArea);
+        }
+    }
+
+    function refreshPlotIfActive() {
+        if (ctx.currentView === "plot") {
+            if (Object.keys(ctx.brushes).length > 0) {
+                ctx.applyBrushSelection();
+                ctx.syncCheckboxes();
+            }
+            ctx.renderPlot();
+            ctx.updateQuery();
+        } else if (ctx.currentView === "trend") {
+            if (ctx.trendXBrush || ctx.trendYBrush) {
+                ctx.applyTrendSelection();
+                ctx.syncCheckboxes();
+            }
+            ctx.renderTrend();
+            ctx.updateQuery();
+        }
+    }
+
+    ctx.filterValues.forEach((checkbox) => {
+        checkbox.addEventListener("change", refreshPlotIfActive);
+    });
+    if (ctx.dateStart) {
+        ctx.dateStart.addEventListener("input", refreshPlotIfActive);
+    }
+    if (ctx.dateEnd) {
+        ctx.dateEnd.addEventListener("input", refreshPlotIfActive);
+    }
+    const plotDateClear = shadowRoot.querySelector(".skore-summary-date-clear");
+    if (plotDateClear) {
+        plotDateClear.addEventListener("click", refreshPlotIfActive);
+    }
+    if (ctx.searchInput) {
+        ctx.searchInput.addEventListener("input", () => {
+            ctx.refresh();
+            refreshPlotIfActive();
+        });
+    }
+
+    ctx.refresh();
+}
+    </script>
+</div>
+
+<script>
+skoreInitSummary("skore-summary-862f4336");
+</script>

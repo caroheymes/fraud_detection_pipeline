@@ -1,0 +1,23 @@
+# On hérite des dépendances de base
+-r requirements.txt
+
+# Librairies ML lourdes
+ray[default]>=2.35.0
+skrub 
+haversine
+# skore
+xgboost
+scikit-learn>=1.6.1
+numba>=0.59.0
+shapash
+shapash[report]
+nbconvert
+optuna
+evidently>=0.4.0
+mlflow>=2.4.0
+torch
+networkx
+papermill
+pyOpenSSL>=26.0.0
+notebook
+starlette>=0.50.0.0,<1.0.0

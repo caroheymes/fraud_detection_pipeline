@@ -1,0 +1,25 @@
+# dbt_project/dbt_project.yml
+name: 'fraud_detection_dbt'
+version: '1.0.0'
+config-version: 2
+
+profile: 'fraud_detection_profile'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  fraud_detection_dbt:
+    materialized: table
+    staging:
+      materialized: view
+    marts:
+      materialized: table

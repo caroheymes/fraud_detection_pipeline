@@ -1,0 +1,22 @@
+# dbt_project/profiles.yml
+fraud_detection_profile:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5433') | int }}"
+      user: "{{ env_var('POSTGRES_USER', 'fraud-detection') }}"
+      password: "{{ env_var('POSTGRES_PASSWORD', 'fraud-detection_password') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'fraud-detection') }}"
+      schema: public
+      threads: 4
+    prod:
+      type: postgres
+      host: postgres-prod-dns # Changera en Phase 2 (ex: BigQuery)
+      port: 5432
+      user: fraud-detection
+      password: prod_secure_password
+      dbname: fraud-detection
+      schema: public
+      threads: 8

@@ -1,0 +1,34 @@
+{
+    "FeatureSet_1_Cartesian": {
+        "accuracy": 0.9973333333333333,
+        "prec_class_1": 1.0,
+        "rec_class_1": 0.29411764705882354,
+        "f1_class_1": 0.45454545454545453,
+        "F1_global": 0.7266044269831304,
+        "recall_global": 0.6470588235294118
+    },
+    "FeatureSet_2_No_Personal_IDs_Cartesian": {
+        "accuracy": 0.9968888888888889,
+        "prec_class_1": 0.8,
+        "rec_class_1": 0.23529411764705882,
+        "f1_class_1": 0.36363636363636365,
+        "F1_global": 0.6810384981469856,
+        "recall_global": 0.6175355263675847
+    },
+    "FeatureSet_3_No_State_City_Cartesian": {
+        "accuracy": 0.9978888888888889,
+        "prec_class_1": 0.9411764705882353,
+        "rec_class_1": 0.47058823529411764,
+        "f1_class_1": 0.6274509803921569,
+        "F1_global": 0.8131962127990089,
+        "recall_global": 0.7352383514190866
+    },
+    "FeatureSet_4_No_CityPop_Cartesian": {
+        "accuracy": 0.9977777777777778,
+        "prec_class_1": 0.9375,
+        "rec_class_1": 0.4411764705882353,
+        "f1_class_1": 0.6,
+        "F1_global": 0.7994428969359331,
+        "recall_global": 0.7205324690661453
+    }
+}

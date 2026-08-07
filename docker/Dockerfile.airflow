@@ -1,0 +1,18 @@
+# docker/Dockerfile.airflow
+FROM apache/airflow:3.2.1-python3.12
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+COPY requirements.txt .
+RUN --mount=type=cache,target=/root/.cache/uv uv pip install --system -r requirements.txt
+
+# Retour à l'utilisateur airflow pour l'exécution
+USER airflow
+

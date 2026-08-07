@@ -1,0 +1,306 @@
+
+version: '3.8'
+
+x-airflow-common:
+  &airflow-common
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.airflow
+  environment:
+    &airflow-common-env
+    # Airflow configuration
+    AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__CORE__MP_START_METHOD: forkserver
+    PYTHONUNBUFFERED: '1'
+    OMP_NUM_THREADS: '1'
+    OPENBLAS_NUM_THREADS: '1'
+    MKL_NUM_THREADS: '1'
+    VECLIB_MAXIMUM_THREADS: '1'
+    NUMEXPR_NUM_THREADS: '1'
+    AIRFLOW__API_AUTH__JWT_SECRET: super-secure-jwt-secret-key-at-least-64-characters-long-1234567890abcdef
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-fraud-detection}:${POSTGRES_PASSWORD:-fraud-detection_password}@postgres:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:-FB-g8349RhF25P_Yw8vYg4_r6R14gVp61937f_cR_34=}
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGBAG_IMPORT_TIMEOUT: '300'
+    AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: 'true'
+    # Grand Lyon API Credentials
+    API_LOGIN: ${API_LOGIN}
+    API_PASSWORD: ${API_PASSWORD}
+    # Postgres Connection for data pipeline
+    POSTGRES_USER: ${POSTGRES_USER:-fraud-detection} 
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraud-detection_password}
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: '5432'
+    POSTGRES_DB: ${POSTGRES_DB:-fraud-detection}
+    # MLflow Tracking URI
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    # Ray Address
+    RAY_ADDRESS: ray://ray-head:10001
+    # Python path to import our own modules
+    PYTHONPATH: /opt/airflow/project:/home/airflow/.local/lib/python3.12/site-packages
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./data/historical:/opt/airflow/data
+    - .:/opt/airflow/project # Mount project root for direct access to shared scripts
+    - /var/run/docker.sock:/var/run/docker.sock
+  user: "0:0"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  # ==========================================
+  # 1. DATABASE LAYER (Postgres)
+  # ==========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: fraud-detection-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fraud-detection}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraud-detection_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fraud-detection}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres_backup:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fraud-detection} -d ${POSTGRES_DB:-fraud-detection}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '2.00'
+          memory: 4G
+
+  # ==========================================
+  # 1.5. CACHE / ONLINE STORE LAYER (Redis)
+  # ==========================================
+  redis:
+    image: redis:7-alpine
+    container_name: fraud-detection-redis
+    ports:
+      - "6381:6379"
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1G
+
+  # ==========================================
+  # 2. TRACKING LAYER (MLflow Server)
+  # ==========================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: fraud-detection-mlflow
+    ports:
+      - "5001:5000"
+    environment:
+      - BACKEND_STORE_URI=postgresql://${POSTGRES_USER:-fraud-detection}:${POSTGRES_PASSWORD:-fraud-detection_password}@postgres:5432/mlflow
+      - ARTIFACT_ROOT=/mlflow/artifacts
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    entrypoint: >
+      sh -c "
+      pip install --no-cache-dir psycopg2-binary &&
+      mlflow server 
+      --backend-store-uri postgresql://${POSTGRES_USER:-fraud-detection}:${POSTGRES_PASSWORD:-fraud-detection_password}@postgres:5432/mlflow
+      --artifacts-destination /mlflow/artifacts 
+      --host 0.0.0.0
+      --port 5000
+      --serve-artifacts
+      --disable-security-middleware"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 2G
+
+  # ==========================================
+  # 3. DISTRIBUTED CALCULUS LAYER (Ray Cluster)
+  # ==========================================
+  ray-head:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ray
+    image: fraud-detection-ray:latest
+    container_name: fraud-detection-ray-head
+    ports:
+      - "8266:8265"  # Dashboard Port
+      - "10002:10001" # Ray Client Port
+      - "6380:6379"   # Ray Redis/GCS Port
+      - "8001:8000"   # FastAPI
+    volumes:
+      - .:/home/ray/project
+    environment:
+      - API_LOGIN=${API_LOGIN}
+      - API_PASSWORD=${API_PASSWORD}
+      - POSTGRES_USER=${POSTGRES_USER:-fraud-detection}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-fraud-detection_password}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB:-fraud-detection}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    command: ray start --head --port=6379 --dashboard-host=0.0.0.0 --num-cpus=0 --block
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 6G
+
+  ray-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ray
+    image: fraud-detection-ray:latest
+    container_name: fraud-detection-ray-worker
+    volumes:
+      - .:/home/ray/project
+    environment:
+      - API_LOGIN=${API_LOGIN}
+      - API_PASSWORD=${API_PASSWORD}
+      - POSTGRES_USER=${POSTGRES_USER:-fraud-detection}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-fraud-detection_password}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB:-fraud-detection}
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+    command: ray start --address=ray-head:6379 --num-cpus=2 --block
+    depends_on:
+      - ray-head
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 9G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # ==========================================
+  # 4. ORCHESTRATION LAYER (Apache Airflow)
+  # ==========================================
+  airflow-init:
+    <<: *airflow-common
+    container_name: fraud-detection-airflow-init
+    command: version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      _AIRFLOW_WWW_USER_ROLE: Admin
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: fraud-detection-airflow-webserver
+    command:  api-server
+    ports:
+      - "8082:8080"
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1.5G
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: fraud-detection-airflow-scheduler
+    command: scheduler
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1.5G
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    container_name: fraud-detection-airflow-dag-processor
+    command: dag-processor
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 1.5G
+
+  # ==========================================
+  # 5. VISUALISATION LAYER (Streamlit App)
+  # ==========================================
+  streamlit:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: fraud-detection-streamlit
+    ports:
+      - "8511:8501"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fraud-detection}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fraud-detection_password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: '5432'
+      POSTGRES_DB: ${POSTGRES_DB:-fraud-detection}
+      PYTHONUNBUFFERED: '1'
+      STREAMLIT_SERVER_ENABLE_CORS: "false"
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: "false"
+      STREAMLIT_SERVER_HEADLESS: "true"
+      STREAMLIT_SERVER_FILE_WATCHER_TYPE: "none"
+    volumes:
+      - .:/opt/airflow/project
+    working_dir: /opt/airflow/project
+    entrypoint: ["python", "-m", "streamlit", "run", "src/dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.50'
+          memory: 2G
+
+  # ngrok:
+  #   image: ngrok/ngrok:latest
+  #   container_name: ngrok_tunnel
+  #   volumes:
+  #     - ./ngrok.yml:/etc/ngrok.yml
+  #   command:
+  #     - "start"
+  #     - "--all"
+  #     - "--config"
+  #     - "/etc/ngrok.yml"
+  #   ports:
+  #     - "4041:4040"
+  #   depends_on:
+  #     - airflow-webserver
+  #     - streamlit
+  #     - postgres
+  #   restart: always
+
+  
+  # • Airflow : http://localhost:8081
+  # • Streamlit : http://localhost:8511
+  # • Ray Dashboard : http://localhost:8266
+  # • MLflow : http://localhost:5001
+
+
+volumes:
+  postgres-data:
+  mlflow-artifacts:

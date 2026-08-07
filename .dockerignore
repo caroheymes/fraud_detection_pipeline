@@ -1,0 +1,14 @@
+# .dockerignore
+logs/
+data/
+dags/
+postgres_data/
+.git/
+.venv/
+__pycache__/
+*.pyc
+*.csv
+*.log
+*.sqlite
+mlflow.db
+*~

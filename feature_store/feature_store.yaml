@@ -1,0 +1,14 @@
+project: fraud_detection_store
+registry: data/registry.db
+provider: local
+entity_key_serialization_version: 2
+offline_store:
+  type: postgres
+  host: ${POSTGRES_HOST}
+  port: 5432
+  database: ${POSTGRES_DB}
+  user: ${POSTGRES_USER}
+  password: ${POSTGRES_PASSWORD}
+online_store:
+  type: redis
+  connection_string: "redis:6379"

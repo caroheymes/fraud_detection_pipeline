@@ -1,0 +1,8 @@
+# project_info.yml
+General Information:
+  project_name: "MLOps Fraud Detection"
+  author: "MLOps Team"
+  date: "auto"
+
+Description:
+  description: "Rapport d'expliquabilite pour le modele de classification de fraude XGBoost."

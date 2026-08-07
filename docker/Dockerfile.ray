@@ -1,0 +1,21 @@
+# docker/Dockerfile.ray
+FROM rayproject/ray:2.35.0-py312
+
+WORKDIR /home/ray/project
+
+# Install extra system requirements for Postgres and compilers
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Back to normal ray user
+USER ray
+COPY requirements.txt .
+COPY requirements-ml.txt .
+# RUN pip install --no-cache-dir -r requirements.txt
+# RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+RUN --mount=type=cache,target=/home/ray/.cache/uv,uid=1000,gid=100 uv pip install --system -r requirements-ml.txt

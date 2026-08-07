@@ -1,0 +1,2 @@
+# dbt_project/models/.gitkeep
+# Ce dossier contiendra les modèles SQL de transformation dbt (ex: staging, marts).

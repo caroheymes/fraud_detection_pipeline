@@ -1,0 +1,114 @@
+{
+    "XGBoost_Sampling_5pc": {
+        "accuracy": 0.982,
+        "prec_class_1": 0.12903225806451613,
+        "rec_class_1": 1.0,
+        "f1_class_1": 0.22857142857142856,
+        "F1_global": 0.6097325945555288,
+        "recall_global": 0.990975935828877,
+        "confusion_matrix": {
+            "tn": 1469,
+            "fp": 27,
+            "fn": 0,
+            "tp": 4
+        }
+    },
+    "HistGradientBoosting_Sampling_5pc": {
+        "accuracy": 0.988,
+        "prec_class_1": 0.0625,
+        "rec_class_1": 0.25,
+        "f1_class_1": 0.1,
+        "F1_global": 0.5469798657718121,
+        "recall_global": 0.6199866310160428,
+        "confusion_matrix": {
+            "tn": 1481,
+            "fp": 15,
+            "fn": 3,
+            "tp": 1
+        }
+    },
+    "GNN_GCN_Sampling_5pc": {
+        "accuracy": 0.9973333333333333,
+        "prec_class_1": 0.0,
+        "rec_class_1": 0.0,
+        "f1_class_1": 0.0,
+        "F1_global": 0.4993324432576769,
+        "recall_global": 0.5,
+        "confusion_matrix": {
+            "tn": 1496,
+            "fp": 0,
+            "fn": 4,
+            "tp": 0
+        }
+    },
+    "NVIDIA_GraphSAGE_XGBoost_Sampling_5pc": {
+        "accuracy": 0.9813333333333333,
+        "prec_class_1": 0.125,
+        "rec_class_1": 1.0,
+        "f1_class_1": 0.2222222222222222,
+        "F1_global": 0.6063877642825011,
+        "recall_global": 0.9906417112299466,
+        "confusion_matrix": {
+            "tn": 1468,
+            "fp": 28,
+            "fn": 0,
+            "tp": 4
+        }
+    },
+    "XGBoost_Sampling_10pc": {
+        "accuracy": 0.9766666666666667,
+        "prec_class_1": 0.10256410256410256,
+        "rec_class_1": 1.0,
+        "f1_class_1": 0.18604651162790697,
+        "F1_global": 0.5871050955163546,
+        "recall_global": 0.9883021390374331,
+        "confusion_matrix": {
+            "tn": 1461,
+            "fp": 35,
+            "fn": 0,
+            "tp": 4
+        }
+    },
+    "HistGradientBoosting_Sampling_10pc": {
+        "accuracy": 0.9753333333333334,
+        "prec_class_1": 0.05405405405405406,
+        "rec_class_1": 0.5,
+        "f1_class_1": 0.0975609756097561,
+        "F1_global": 0.5425283756048105,
+        "recall_global": 0.7383021390374331,
+        "confusion_matrix": {
+            "tn": 1461,
+            "fp": 35,
+            "fn": 2,
+            "tp": 2
+        }
+    },
+    "GNN_GCN_Sampling_10pc": {
+        "accuracy": 0.9886666666666667,
+        "prec_class_1": 0.0,
+        "rec_class_1": 0.0,
+        "f1_class_1": 0.0,
+        "F1_global": 0.4971505196111297,
+        "recall_global": 0.49565508021390375,
+        "confusion_matrix": {
+            "tn": 1483,
+            "fp": 13,
+            "fn": 4,
+            "tp": 0
+        }
+    },
+    "NVIDIA_GraphSAGE_XGBoost_Sampling_10pc": {
+        "accuracy": 0.9773333333333334,
+        "prec_class_1": 0.10526315789473684,
+        "rec_class_1": 1.0,
+        "f1_class_1": 0.19047619047619047,
+        "F1_global": 0.5894909688013137,
+        "recall_global": 0.9886363636363636,
+        "confusion_matrix": {
+            "tn": 1462,
+            "fp": 34,
+            "fn": 0,
+            "tp": 4
+        }
+    }
+}

@@ -1,0 +1,16 @@
+# .ruff.toml at project root
+
+[lint]
+# List of rule codes to ignore globally in the project
+ignore = [
+    "BLE",   # Blind except Exception
+    "DTZ",   # Naive datetimes (tzinfo, now(), strptime without %z, etc.)
+    "F841",  # Local variable is assigned to but never used
+    "S110",  # try-except-pass
+    "PLW",   # Subprocess without check=True, unused global variables, etc.
+    "C4",    # Unnecessary dict/list/set helper calls
+    "PLR",   # Refactoring checks (sys.exit instead of exit, etc.)
+    "PIE",   # Miscellaneous lints (startswith tuple, etc.)
+    "SIM",   # Simplicity checks (use enumerate, etc.)
+    "TRY",   # Exception raising best practices (TRY002, etc.)
+]

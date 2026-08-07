@@ -1,0 +1,50 @@
+{
+    "FeatureSet_1_All_Columns": {
+        "accuracy": 0.997,
+        "prec_class_1": 0.8888888888888888,
+        "rec_class_1": 0.23529411764705882,
+        "f1_class_1": 0.37209302325581395,
+        "F1_global": 0.6852947156708986,
+        "recall_global": 0.6175912925955571
+    },
+    "FeatureSet_2_No_Personal_IDs": {
+        "accuracy": 0.9973333333333333,
+        "prec_class_1": 0.9166666666666666,
+        "rec_class_1": 0.3235294117647059,
+        "f1_class_1": 0.4782608695652174,
+        "F1_global": 0.7384620600471736,
+        "recall_global": 0.6617089396543806
+    },
+    "FeatureSet_3_No_State_City": {
+        "accuracy": 0.9976666666666667,
+        "prec_class_1": 0.9333333333333333,
+        "rec_class_1": 0.4117647058823529,
+        "f1_class_1": 0.5714285714285714,
+        "F1_global": 0.7851293600834016,
+        "recall_global": 0.7058265867132041
+    },
+    "FeatureSet_4_No_CityPop": {
+        "accuracy": 0.9977777777777778,
+        "prec_class_1": 0.9375,
+        "rec_class_1": 0.4411764705882353,
+        "f1_class_1": 0.6,
+        "F1_global": 0.7994428969359331,
+        "recall_global": 0.7205324690661453
+    },
+    "FeatureSet_5_Only_State_City": {
+        "accuracy": 0.9972222222222222,
+        "prec_class_1": 0.8461538461538461,
+        "rec_class_1": 0.3235294117647059,
+        "f1_class_1": 0.46808510638297873,
+        "F1_global": 0.7333462907283913,
+        "recall_global": 0.6616531734264083
+    },
+    "FeatureSet_6_Only_CityPop": {
+        "accuracy": 0.998,
+        "prec_class_1": 0.8636363636363636,
+        "rec_class_1": 0.5588235294117647,
+        "f1_class_1": 0.6785714285714286,
+        "F1_global": 0.8387841538755494,
+        "recall_global": 0.7792444660219653
+    }
+}
