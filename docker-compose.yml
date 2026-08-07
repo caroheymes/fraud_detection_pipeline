@@ -276,23 +276,21 @@ services:
           cpus: '1.50'
           memory: 2G
 
-  # ngrok:
-  #   image: ngrok/ngrok:latest
-  #   container_name: ngrok_tunnel
-  #   volumes:
-  #     - ./ngrok.yml:/etc/ngrok.yml
-  #   command:
-  #     - "start"
-  #     - "--all"
-  #     - "--config"
-  #     - "/etc/ngrok.yml"
-  #   ports:
-  #     - "4041:4040"
-  #   depends_on:
-  #     - airflow-webserver
-  #     - streamlit
-  #     - postgres
-  #   restart: always
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ngrok_tunnel
+    volumes:
+      - ./ngrok.yml:/etc/ngrok.yml
+    command:
+      - "start"
+      - "--all"
+      - "--config"
+      - "/etc/ngrok.yml"
+    ports:
+      - "4041:4040"
+    depends_on:
+      - streamlit
+    restart: always
 
   
   # • Airflow : http://localhost:8081

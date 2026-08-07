@@ -75,3 +75,6 @@ feature_store/data/
 # Custom project folders
 python3.12/
 perso/
+
+# ngrok credentials
+ngrok.yml

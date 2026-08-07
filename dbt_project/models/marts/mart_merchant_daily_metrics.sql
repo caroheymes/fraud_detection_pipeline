@@ -11,7 +11,7 @@ daily as (
         sum(case when is_predicted_fraud = 0 then transaction_amount else 0 end) as clean_volume,
         sum(case when is_predicted_fraud = 0 then 1 else 0 end) as clean_transactions_count,
         -- Volume/nombre fraude (perte potentielle)
-        sum(case when is_predicted_fraud = 1 then transaction_amount else 0 end) as fraud_volume_loss,
+        sum(case when is_predicted_fraud = 1 then transaction_amount else 0 end) as blocked_fraud_volume,
         sum(case when is_predicted_fraud = 1 then 1 else 0 end) as fraud_transactions_count,
         -- Taux de fraude
         round(

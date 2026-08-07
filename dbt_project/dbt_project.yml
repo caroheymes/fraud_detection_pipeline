@@ -21,5 +21,7 @@ models:
     materialized: table
     staging:
       materialized: view
+      +schema: silver
     marts:
-      materialized: table
+      +materialized: table
+      +schema: gold

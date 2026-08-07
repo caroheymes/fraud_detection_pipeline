@@ -22,7 +22,7 @@ pytz
 grequests
 
 # feature store
-feast==0.65.0
+feast==0.47.0
 redis>=5.0.0
 psycopg[binary]>=3.1.0
 psycopg-pool>=3.2.0

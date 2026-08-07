@@ -28,9 +28,9 @@ def main():
     df = pd.read_csv(csv_path)
     df["trans_date_trans_time"] = pd.to_datetime(df["trans_date_trans_time"])
 
-    # 2. Filtrage de la fenêtre de simulation (7 jours après l'entraînement initial)
+    # 2. Filtrage de la fenêtre de simulation (30 jours après l'entraînement initial)
     start_date = df["trans_date_trans_time"].min() + timedelta(days=30)
-    end_date = start_date + timedelta(days=7)
+    end_date = start_date + timedelta(days=30)
 
     print(f"Extraction des transactions du {start_date} au {end_date}...")
     df_sim = df[
@@ -38,13 +38,13 @@ def main():
         & (df["trans_date_trans_time"] < end_date)
     ].copy()
 
-    # 3. Création de la clé temporelle au format YYYY-MM-DD_HH-MM
-    df_sim["time_key"] = df_sim["trans_date_trans_time"].dt.strftime("%Y-%m-%d_%H-%M")
+    # 3. Création de la clé temporelle au format YYYY-MM-DD (Groupement journalier)
+    df_sim["time_key"] = df_sim["trans_date_trans_time"].dt.strftime("%Y-%m-%d")
 
-    # 4. Groupement et écriture des mini-CSV
+    # 4. Groupement et écriture des CSV
     groups = df_sim.groupby("time_key")
     total_groups = len(groups)
-    print(f"Total de fichiers de 1 minute à générer : {total_groups}")
+    print(f"Total de fichiers journaliers à générer : {total_groups}")
 
     count = 0
     for time_key, group in groups:

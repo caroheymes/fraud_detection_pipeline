@@ -11,12 +11,14 @@
 
 import json
 import os
+import time
 
 import mlflow
 import mlflow.sklearn
 import numpy as np
 import pandas as pd
 import redis
+import shap
 from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
@@ -129,6 +131,53 @@ def haversine_vectorized(lat1, lon1, lat2, lon2):
     return R * c
 
 
+# --- 4.5. CALCUL SHAP EN TEMPS RÉEL (EXPLICABILITÉ) ---
+def compute_shap_values(model_pipeline, X):
+    try:
+        preprocessor = model_pipeline.named_steps["preprocessor"]
+        predictor = model_pipeline.named_steps["model"]
+        
+        # Encodage des features
+        X_enc = preprocessor.transform(X)
+        feature_names = list(preprocessor.get_feature_names_out())
+        
+        # Convertir en DataFrame pour l'explication si c'est un tableau numpy
+        if not isinstance(X_enc, pd.DataFrame):
+            X_enc_df = pd.DataFrame(X_enc, columns=feature_names)
+        else:
+            X_enc_df = X_enc
+            
+        # Explainer Tree SHAP
+        explainer = shap.TreeExplainer(predictor)
+        raw_shap = explainer.shap_values(X_enc_df)
+        
+        # Adapter la dimension des SHAP values selon le format retourné
+        if isinstance(raw_shap, list):
+            if len(raw_shap) == 2:
+                raw_shap = raw_shap[1]
+            else:
+                raw_shap = raw_shap[0]
+        elif len(raw_shap.shape) == 3:
+            raw_shap = raw_shap[:, :, 1]
+            
+        # Extraire les features d'intérêt pour chaque ligne
+        shap_dicts = []
+        for i in range(len(X)):
+            row_dict = {}
+            for col in ["amt", "distance_achat", "age", "city_pop", "hour_sin", "hour_cos"]:
+                if col in feature_names:
+                    idx = feature_names.index(col)
+                    row_dict[col] = float(raw_shap[i, idx])
+                else:
+                    row_dict[col] = 0.0
+            shap_dicts.append(row_dict)
+        return shap_dicts
+    except Exception as e:
+        print(f"[SHAP API Engine] Échec du calcul SHAP : {e}")
+        # Repli sur des valeurs vides en cas d'erreur
+        return [{} for _ in range(len(X))]
+
+
 # --- 5. LOGGING ASYNCHRONE DANS POSTGRESQL (INSERT-ONLY) ---
 def save_predictions_to_db(
     transactions_list: list,
@@ -137,19 +186,21 @@ def save_predictions_to_db(
     model_version: str,
     fast_pass_suspicions: list,
     fast_pass_scores: list,
+    prediction_latency_ms: float,
+    shap_values_list: list,
 ):
     query = text("""
         INSERT INTO silver.rawdata (
             trans_date_trans_time, cc_num, merchant, category, amt, first, last, gender,
             street, city, state, zip, lat, long, city_pop, job, dob, trans_num,
             unix_time, merch_lat, merch_long, is_fraud, prediction, prediction_proba, model_version,
-            fast_pass_suspicion, fast_pass_score
+            fast_pass_suspicion, fast_pass_score, prediction_latency_ms, shap_values
         ) VALUES (
             :trans_date_trans_time, :cc_num, :merchant, :category, :amt, :first, :last, :gender,
             :street, :city, :state, :zip, :lat, :long, :city_pop, :job, :dob, :trans_num,
             :unix_time, :merch_lat, :merch_long, :is_fraud, :prediction, :prediction_proba, :model_version,
-            :fast_pass_suspicion, :fast_pass_score
-        );
+            :fast_pass_suspicion, :fast_pass_score, :prediction_latency_ms, :shap_values
+        ) ON CONFLICT (trans_num) DO NOTHING;
     """)
 
     params_list = []
@@ -160,6 +211,8 @@ def save_predictions_to_db(
         t_param["model_version"] = model_version
         t_param["fast_pass_suspicion"] = int(fast_pass_suspicions[i])
         t_param["fast_pass_score"] = int(fast_pass_scores[i])
+        t_param["prediction_latency_ms"] = float(prediction_latency_ms)
+        t_param["shap_values"] = json.dumps(shap_values_list[i])
         params_list.append(t_param)
 
     try:
@@ -167,7 +220,7 @@ def save_predictions_to_db(
             conn.execute(query, params_list)
             conn.commit()
         print(
-            f"[Postgres MLOps] Ingestion réussie pour {len(transactions_list)} transactions (XGBoost + Fast Pass)."
+            f"[Postgres MLOps] Ingestion réussie pour {len(transactions_list)} transactions (XGBoost + Fast Pass + SHAP + Latency)."
         )
     except Exception as e:
         print(f"[Postgres MLOps] Erreur d'écriture dans la base : {e}")
@@ -216,10 +269,24 @@ def startup_event():
                     prediction INT,
                     prediction_proba NUMERIC(5, 4),
                     model_version VARCHAR(50),
+                    fast_pass_suspicion INT,
+                    fast_pass_score INT,
+                    prediction_latency_ms NUMERIC(10, 4),
+                    shap_values JSONB,
                     logged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
             """)
             )
+            
+            # Ajout sécurisé des colonnes si la table pré-existait sans elles
+            try:
+                conn.execute(text("ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS prediction_latency_ms NUMERIC(10, 4);"))
+                conn.execute(text("ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS shap_values JSONB;"))
+                conn.execute(text("ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_suspicion INT;"))
+                conn.execute(text("ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_score INT;"))
+                conn.commit()
+            except Exception as schema_err:
+                print(f"[Postgres Schema Update] Erreur de mise à niveau de table : {schema_err}")
 
             # S'assurer que les deux colonnes d'observabilité Fast Pass existent dans la table
             conn.execute(
@@ -414,8 +481,9 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
         fast_pass_scores.append(score)
 
     # ==========================================================
-    # 5. INFÉRENCE SYSTÉMATIQUE XGBOOST
+    # 5. INFÉRENCE SYSTÉMATIQUE XGBOOST AVEC LATENCE
     # ==========================================================
+    start_time = time.time()
     try:
         predictions = model_pipeline.predict(X)
         probabilities = model_pipeline.predict_proba(X)[:, 1]
@@ -424,6 +492,13 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
             "status": "error",
             "message": f"Erreur pendant l'inférence XGBoost : {ml_err}",
         }
+    end_time = time.time()
+    prediction_latency_ms = ((end_time - start_time) * 1000.0) / max(1, len(df))
+
+    # ==========================================================
+    # 5.5 CALCUL DES CONTRIBUTIONS SHAP LOCALES
+    # ==========================================================
+    shap_values_list = compute_shap_values(model_pipeline, X)
 
     # ==========================================================
     # 6. ENREGISTREMENT ASYNCHRONE DANS LA BASE POSTGRES
@@ -436,6 +511,8 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
         model_run_id,
         fast_pass_suspicions,
         fast_pass_scores,
+        prediction_latency_ms,
+        shap_values_list,
     )
 
     # 7. Préparation de la réponse de l'API
