@@ -26,7 +26,7 @@ jobs:
 
       - name: Install Lint & Test dependencies
         run: |
-          uv pip install --system fastapi uvicorn pydantic httpx pytest pandas "numpy<2.0.0" scikit-learn xgboost skrub ruff
+          uv pip install --system fastapi uvicorn pydantic httpx pytest pandas "numpy<2.0.0" scikit-learn xgboost skrub ruff sqlalchemy
 
       - name: Run Ruff Linter
         run: |

@@ -231,11 +231,11 @@ default_args = {
 }
 
 with DAG(
-    dag_id="predict_batchV2",
+    dag_id="test_ingest_parallel_requests",
     default_args=default_args,
     description="Inférence parallélisée avec GRequests sur les données de fraude",
     schedule=None,
-    start_date=datetime(2026, 1, 1),
+    start_date=datetime(2019, 1, 1),
     catchup=False,
     max_active_runs=1,
     tags=["fraud-detection", "pipeline", "grequests", "predict"],
