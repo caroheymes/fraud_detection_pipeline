@@ -81,6 +81,7 @@ ngrok.yml
 
 # Local simulation data
 data/
+src/training/reference_data.csv
 
 # Architecture diagrams and design files
 *.mmd

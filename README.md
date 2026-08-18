@@ -69,3 +69,11 @@ La boucle automatique d'Airflow effectue quotidiennement les tâches suivantes :
 1. **Audit** : `dags/drift_and_retrain.py` appelle `src/audit/drift_analysis.py`.
 2. **Réentraînement** : Si la dérive des données est supérieure au seuil Evidently, `src/training/train.py` est lancé sur le cluster Ray.
 3. **Mise à jour** : Le modèle est versionné dans MLflow, sauvegardé sur disque et automatiquement rechargé par FastAPI.
+
+## Liens et demo
+
+• FastApi : http://localhost:8001/docs#/
+• Dashboard : https://fraud-detection.ngrok.app/
+• Airflow : http://localhost:8082/
+• MLFlow : http://127.0.0.1:5001/#/
+Batch ingestion : https://drive.google.com/file/d/1w0A6XtAlBXip9RwaOSHs-L9cPTOmzCM_/view?usp=sharing
