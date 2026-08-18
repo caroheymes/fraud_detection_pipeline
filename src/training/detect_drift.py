@@ -56,19 +56,19 @@ def main():
         df["lat"], df["long"], df["merch_lat"], df["merch_long"]
     )
 
-    # Détermination de la période de référence (30 premiers jours du dataset)
-    reference_period_start = df["trans_date_trans_time"].min()
-    reference_period_end = reference_period_start + pd.Timedelta(days=30)
-
     # Détermination de la période courante (fenêtre de 1 jour se terminant à la date spécifiée)
     current_period_end = pd.to_datetime(args.current_date)
     current_period_start = current_period_end - pd.Timedelta(days=1)
 
+    # Détermination de la période de référence : les 30 jours précédant le début de la période courante
+    reference_period_end = current_period_start
+    reference_period_start = reference_period_end - pd.Timedelta(days=30)
+
     print(
-        f"Période de référence (30 jours) : du {reference_period_start} au {reference_period_end}"
+        f"Période de référence (30 jours de base) : du {reference_period_start} au {reference_period_end}"
     )
     print(
-        f"Période courante (1 jour) : du {current_period_start} au {current_period_end}"
+        f"Période courante (1 jour cible) : du {current_period_start} au {current_period_end}"
     )
 
     # Colonnes pertinentes pour le schéma Evidently
@@ -82,7 +82,10 @@ def main():
     ]
 
     # Filtrage des DataFrames
-    start_df = df[df["trans_date_trans_time"] < reference_period_end].copy()
+    start_df = df[
+        (df["trans_date_trans_time"] >= reference_period_start)
+        & (df["trans_date_trans_time"] < reference_period_end)
+    ].copy()
     start_df = start_df[relevant_columns]
 
     end_df = df[

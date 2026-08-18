@@ -78,3 +78,13 @@ perso/
 
 # ngrok credentials
 ngrok.yml
+
+# Local simulation data
+data/
+
+# Architecture diagrams and design files
+*.mmd
+*.eraser
+
+# Office temporary/lock files
+~$*

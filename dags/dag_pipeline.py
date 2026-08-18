@@ -51,8 +51,8 @@ def ingest_data_from_queue(ti):
             "Le répertoire ./data/queue est vide. Aucune donnée à ingérer."
         )
 
-    # Prendre un lot (batch) de max 100 fichiers pour accélérer le traitement
-    batch_size = 100
+    # Prendre un lot (batch) de max 1 fichier pour traiter au fur et à mesure
+    batch_size = 1
     batch_files = queue_files[:batch_size]
     filenames = [os.path.basename(f) for f in batch_files]
 
@@ -229,7 +229,7 @@ with DAG(
     dag_id="batch_prediction_pipeline",
     default_args=default_args,
     description="Inférence periodique sur les données de fraude",
-    schedule=timedelta(minutes=1), # None,  
+    schedule=timedelta(minutes=1),  # None,
     start_date=datetime(2019, 1, 1),
     catchup=False,
     max_active_runs=1,  # IMPORTANT : Traite les fichiers un par un

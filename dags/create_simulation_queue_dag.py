@@ -6,23 +6,25 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+
 def run_create_simulation_queue():
     """Exécute le script create_simulation_queue.py dans le conteneur fraud-detection-ray-head."""
     # Exécution dans le conteneur Ray comme suggéré par la documentation et les exemples du projet
     cmd = "docker exec -t fraud-detection-ray-head python src/training/create_simulation_queue.py --duration-value 1 --duration-unit hours --steps 60"
     print(f"Exécution de la commande : {cmd}")
-    
+
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    
+
     print("STDOUT :")
     print(res.stdout)
     print("STDERR :")
     print(res.stderr)
-    
+
     if res.returncode != 0:
         raise RuntimeError(
             f"Le script create_simulation_queue.py a échoué avec le code de retour {res.returncode}"
         )
+
 
 default_args = {
     "owner": "airflow",
@@ -41,7 +43,6 @@ with DAG(
     max_active_runs=1,
     tags=["simulation", "fraud-detection"],
 ) as dag:
-
     run_script_task = PythonOperator(
         task_id="run_create_simulation_queue",
         python_callable=run_create_simulation_queue,

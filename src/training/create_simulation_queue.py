@@ -4,7 +4,6 @@
 #   docker exec -t fraud-detection-ray-head python src/training/create_simulation_queue.py --duration-value 720 --duration-unit hours
 
 import argparse
-import glob
 import os
 import sys
 from datetime import timedelta
@@ -13,11 +12,9 @@ import pandas as pd
 
 
 def main():
-    print("--- CRÉATION DE LA FILE D'ATTENTE DE SIMULATION DYNAMIQUE (30 ETAPES) ---")
-
     # 1. Parsing des arguments de ligne de commande
     parser = argparse.ArgumentParser(
-        description="Génération de 30 fichiers de simulation pour l'inférence par lots."
+        description="Génération de fichiers de simulation pour l'inférence par lots."
     )
     parser.add_argument(
         "--duration-value",
@@ -32,7 +29,17 @@ def main():
         default="days",
         help="Unité de la durée: 'days' ou 'hours' (défaut: 'days')",
     )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=30,
+        help="Nombre d'étapes/fichiers à générer (défaut: 30)",
+    )
     args = parser.parse_args()
+
+    print(
+        f"--- CRÉATION DE LA FILE D'ATTENTE DE SIMULATION DYNAMIQUE ({args.steps} ETAPES) ---"
+    )
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     csv_path = os.path.abspath(os.path.join(script_dir, "../../fraudTest.csv"))
@@ -44,15 +51,6 @@ def main():
 
     # Création du dossier queue s'il n'existe pas
     os.makedirs(queue_dir, exist_ok=True)
-    
-    # Nettoyage préalable des anciens fichiers dans la file
-    old_files = glob.glob(os.path.join(queue_dir, "*.csv"))
-    for f in old_files:
-        try:
-            os.remove(f)
-        except Exception:
-            pass
-    print(f"Nettoyé {len(old_files)} anciens fichiers de simulation dans : {queue_dir}")
 
     # 2. Chargement du dataset complet
     print("Chargement du dataset fraudTest.csv...")
@@ -70,6 +68,7 @@ def main():
     start_date = None
     try:
         import sqlalchemy
+
         engine = sqlalchemy.create_engine(db_url)
         with engine.connect() as conn:
             max_date_val = conn.execute(
@@ -80,28 +79,34 @@ def main():
                 if t.tzinfo is not None:
                     t = t.tz_localize(None)
                 start_date = t
-                print(f"[Simulation MLOps] Date max détectée dans Postgres : {start_date}")
+                print(
+                    f"[Simulation MLOps] Date max détectée dans Postgres : {start_date}"
+                )
     except Exception as e:
-        print(f"[Simulation MLOps] Impossible de lire la date max Postgres, repli sur le défaut : {e}")
+        print(
+            f"[Simulation MLOps] Impossible de lire la date max Postgres, repli sur le défaut : {e}"
+        )
 
     if start_date is None:
         start_date = df["trans_date_trans_time"].min() + timedelta(days=30)
         print(f"[Simulation MLOps] Date de début par défaut : {start_date}")
 
-    # Calcul de l'intervalle temporel pour découper exactement en 30 étapes
+    # Calcul de l'intervalle temporel pour découper exactement en args.steps étapes
     if args.duration_unit == "days":
         total_delta = timedelta(days=args.duration_value)
     else:
         total_delta = timedelta(hours=args.duration_value)
 
     end_date = start_date + total_delta
-    interval_delta = total_delta / 30.0
+    interval_delta = total_delta / float(args.steps)
 
-    print(f"Simulation du {start_date} au {end_date} ({args.duration_value} {args.duration_unit}).")
-    print(f"Découpage en 30 fichiers de {interval_delta} chacun...\n")
+    print(
+        f"Simulation du {start_date} au {end_date} ({args.duration_value} {args.duration_unit})."
+    )
+    print(f"Découpage en {args.steps} fichiers de {interval_delta} chacun...\n")
 
-    # 4. Génération et écriture des 30 fichiers
-    for i in range(30):
+    # 4. Génération et écriture des args.steps fichiers
+    for i in range(args.steps):
         bin_start = start_date + i * interval_delta
         bin_end = bin_start + interval_delta
 
@@ -113,14 +118,18 @@ def main():
 
         # Construction du nom de fichier
         formatted_start = bin_start.strftime("%Y-%m-%d_%H-%M")
-        file_name = f"step_{i+1:02d}_{formatted_start}.csv"
+        file_name = f"step_{i + 1:02d}_{formatted_start}.csv"
         file_path = os.path.join(queue_dir, file_name)
 
         df_bin.to_csv(file_path, index=False)
-        print(f" -> [{i+1:02d}/30] {file_name} : {len(df_bin)} transactions écrites.")
+        print(
+            f" -> [{i + 1:02d}/{args.steps}] {file_name} : {len(df_bin)} transactions écrites."
+        )
 
     print("\n--- CRÉATION TERMINÉE AVEC SUCCÈS ---")
-    print(f"La file d'attente contient 30 fichiers de simulation dans {queue_dir}.")
+    print(
+        f"La file d'attente contient {args.steps} fichiers de simulation dans {queue_dir}."
+    )
 
 
 if __name__ == "__main__":

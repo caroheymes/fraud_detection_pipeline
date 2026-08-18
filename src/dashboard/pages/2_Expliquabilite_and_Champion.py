@@ -1,17 +1,18 @@
 # src/dashboard/pages/2_Expliquabilite_and_Champion.py
 
 import os
-import json
+
+import mlflow
 import numpy as np
 import pandas as pd
 import streamlit as st
-import plotly.express as px
-from shapash import SmartExplainer
 from mlflow.tracking import MlflowClient
-import mlflow
+from shapash import SmartExplainer
 
 st.set_page_config(
-    page_title="Expliquabilité Shapash & Performances du Champion", page_icon="🔍", layout="wide"
+    page_title="Expliquabilité Shapash & Performances du Champion",
+    page_icon="🔍",
+    layout="wide",
 )
 
 st.title("🔍 Expliquabilité Shapash & performances du champion")
@@ -19,41 +20,167 @@ st.markdown("---")
 
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
 
+
+def haversine_vectorized(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
+    return R * c
+
+
+def query_db(query):
+    import psycopg2
+
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST", "postgres"),
+            database=os.getenv("POSTGRES_DB", "fraud-detection"),
+            user=os.getenv("POSTGRES_USER", "fraud-detection"),
+            password=os.getenv("POSTGRES_PASSWORD", "fraud-detection_password"),
+            port=os.getenv("POSTGRES_PORT", "5432"),
+        )
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df
+    except Exception:
+        return None
+
+
+def get_hybrid_explain_sample():
+    # 1. Charger l'historique de référence
+    df_ref = pd.read_csv("src/training/reference_data.csv")
+    df_ref["trans_date_trans_time"] = pd.to_datetime(df_ref["trans_date_trans_time"])
+
+    # 2. Récupérer les données réelles des 30 derniers jours de PostgreSQL
+    db_query = """
+        SELECT * FROM silver.rawdata
+        WHERE trans_date_trans_time >= (SELECT COALESCE(MAX(trans_date_trans_time), NOW()) - INTERVAL '30 days' FROM silver.rawdata)
+    """
+    df_prod = query_db(db_query)
+
+    if df_prod is not None and not df_prod.empty:
+        # Formater les colonnes temporelles
+        df_prod["trans_date_trans_time"] = pd.to_datetime(
+            df_prod["trans_date_trans_time"]
+        )
+        df_prod["dob"] = pd.to_datetime(df_prod["dob"])
+
+        # Calculer à la volée les variables requises par le modèle
+        df_prod["age"] = (
+            df_prod["trans_date_trans_time"].dt.year - df_prod["dob"].dt.year
+        )
+        df_prod["distance_achat"] = haversine_vectorized(
+            df_prod["lat"].astype(float),
+            df_prod["long"].astype(float),
+            df_prod["merch_lat"].astype(float),
+            df_prod["merch_long"].astype(float),
+        )
+        dt_col = df_prod["trans_date_trans_time"]
+        df_prod["hour_sin"] = np.sin(2 * np.pi * dt_col.dt.hour / 24.0)
+        df_prod["hour_cos"] = np.cos(2 * np.pi * dt_col.dt.hour / 24.0)
+        df_prod["weekday_sin"] = np.sin(2 * np.pi * dt_col.dt.dayofweek / 7.0)
+        df_prod["weekday_cos"] = np.cos(2 * np.pi * dt_col.dt.dayofweek / 7.0)
+        df_prod["month_sin"] = np.sin(2 * np.pi * dt_col.dt.month / 12.0)
+        df_prod["month_cos"] = np.cos(2 * np.pi * dt_col.dt.month / 12.0)
+
+        prod_normal = df_prod[df_prod["is_fraud"] == 0]
+        prod_fraud = df_prod[df_prod["is_fraud"] == 1]
+    else:
+        prod_normal = pd.DataFrame()
+        prod_fraud = pd.DataFrame()
+
+    ref_normal = df_ref[df_ref["is_fraud"] == 0]
+    ref_fraud = df_ref[df_ref["is_fraud"] == 1]
+
+    # Échantillonnage de 800 transactions saines
+    n_prod_normal = len(prod_normal)
+    if n_prod_normal >= 800:
+        sample_normal = prod_normal.sample(n=800, random_state=42)
+    else:
+        n_needed = 800 - n_prod_normal
+        sample_ref_normal = ref_normal.sample(n=n_needed, random_state=42)
+        sample_normal = pd.concat([prod_normal, sample_ref_normal])
+
+    # Échantillonnage de 200 transactions frauduleuses
+    n_prod_fraud = len(prod_fraud)
+    if n_prod_fraud >= 200:
+        sample_fraud = prod_fraud.sample(n=200, random_state=42)
+    else:
+        n_needed = 200 - n_prod_fraud
+        sample_ref_fraud = ref_fraud.sample(n=n_needed, random_state=42)
+        sample_fraud = pd.concat([prod_fraud, sample_ref_fraud])
+
+    # Combinaison et mélange
+    df_sample_resorted = (
+        pd.concat([sample_normal, sample_fraud])
+        .sample(frac=1.0, random_state=42)
+        .reset_index(drop=True)
+    )
+    return df_sample_resorted
+
+
 # Cache pour le chargement de l'explicateur Shapash
 @st.cache_resource
 def load_shapash_explainer():
     champion_run_id = None
     champion_metrics = {}
     champion_params = {}
-    
+
     try:
         client = MlflowClient()
-        version_details = client.get_model_version_by_alias("fraud_detector", "champion")
+        version_details = client.get_model_version_by_alias(
+            "fraud_detector", "champion"
+        )
         champion_run_id = version_details.run_id
-        
+
         champion_run = client.get_run(champion_run_id)
         champion_metrics = champion_run.data.metrics
         champion_params = champion_run.data.params
-        
+
         champion_model = mlflow.sklearn.load_model(f"runs:/{champion_run_id}/model")
         preprocessor = champion_model.named_steps["preprocessor"]
         predictor = champion_model.named_steps["model"]
-        
-        df_ref = pd.read_csv("src/training/reference_data.csv")
+
         features_list = [
-            "category", "amt", "gender", "distance_achat", "age", "city_pop",
-            "hour_sin", "hour_cos", "weekday_sin", "weekday_cos", "month_sin", "month_cos"
+            "category",
+            "amt",
+            "gender",
+            "distance_achat",
+            "age",
+            "city_pop",
+            "hour_sin",
+            "hour_cos",
+            "weekday_sin",
+            "weekday_cos",
+            "month_sin",
+            "month_cos",
         ]
-        
-        df_normal = df_ref[df_ref["is_fraud"] == 0].sample(n=800, random_state=42)
-        df_fraud = df_ref[df_ref["is_fraud"] == 1].sample(n=200, random_state=42)
-        df_sample_resorted = pd.concat([df_normal, df_fraud]).sample(frac=1.0, random_state=42).reset_index(drop=True)
-        
+        df_sample_resorted = get_hybrid_explain_sample()
+
         X_samp = df_sample_resorted[features_list]
         y_samp = df_sample_resorted["is_fraud"]
         X_enc = preprocessor.transform(X_samp)
-        
-        # Traduction des variables pour la lisibilité
+
+        # Garantir que X_enc est un DataFrame avec des noms de colonnes valides
+        if hasattr(preprocessor, "get_feature_names_out"):
+            cols = [c.split("__")[-1] for c in preprocessor.get_feature_names_out()]
+        else:
+            cols = X_samp.columns.tolist()
+
+        if not isinstance(X_enc, pd.DataFrame):
+            X_enc = pd.DataFrame(X_enc, columns=cols)
+        else:
+            X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
+        X_enc.index = df_sample_resorted["trans_num"].tolist()
+
+        features_groups = {
+            "Heure": ["hour_sin", "hour_cos"],
+            "Jour de la semaine": ["weekday_sin", "weekday_cos"],
+            "Mois de l'année": ["month_sin", "month_cos"],
+        }
         features_dict = {
             "amt": "Montant (€)",
             "distance_achat": "Distance d'achat (km)",
@@ -61,55 +188,90 @@ def load_shapash_explainer():
             "city_pop": "Population de la ville",
             "category": "Catégorie d'achat",
             "gender": "Genre",
-            "hour_sin": "Heure (trigonométrique sinus)",
-            "hour_cos": "Heure (trigonométrique cosinus)",
-            "weekday_sin": "Jour de la semaine (sinus)",
-            "weekday_cos": "Jour de la semaine (cosinus)",
-            "month_sin": "Mois de l'année (sinus)",
-            "month_cos": "Mois de l'année (cosinus)"
         }
+        xpl_obj = SmartExplainer(
+            model=predictor,
+            features_groups=features_groups,
+            features_dict=features_dict,
+        )
 
-        xpl_obj = SmartExplainer(model=predictor, features_dict=features_dict)
-        
         def dummy_get_interaction_values(selection=None, n_samples_max=None):
             n_samp = len(selection) if selection is not None else 100
             n_feat = X_enc.shape[1]
             return np.zeros((n_samp, n_feat, n_feat))
-            
+
         xpl_obj.get_interaction_values = dummy_get_interaction_values
         xpl_obj.compile(x=X_enc, y_target=y_samp)
-        return xpl_obj, df_sample_resorted, X_enc, champion_metrics, champion_params, f"Version {version_details.version}"
-        
+        return (
+            xpl_obj,
+            df_sample_resorted,
+            X_enc,
+            champion_metrics,
+            champion_params,
+            f"Version {version_details.version}",
+        )
+
     except Exception as err:
-        st.warning(f"Impossible de charger via l'alias champion, repli sur le dernier run : {err}")
+        st.warning(
+            f"Impossible de charger via l'alias champion, repli sur le dernier run : {err}"
+        )
         try:
             client = MlflowClient()
             experiment = client.get_experiment_by_name("Default")
-            runs = client.search_runs(experiment_ids=[experiment.experiment_id], order_by=["start_time DESC"])
+            runs = client.search_runs(
+                experiment_ids=[experiment.experiment_id], order_by=["start_time DESC"]
+            )
             if len(runs) > 0:
                 latest_run = runs[0]
                 champion_run_id = latest_run.info.run_id
                 champion_metrics = latest_run.data.metrics
                 champion_params = latest_run.data.params
-                champion_model = mlflow.sklearn.load_model(f"runs:/{champion_run_id}/model")
-                
+                champion_model = mlflow.sklearn.load_model(
+                    f"runs:/{champion_run_id}/model"
+                )
+
                 preprocessor = champion_model.named_steps["preprocessor"]
                 predictor = champion_model.named_steps["model"]
-                
-                df_ref = pd.read_csv("src/training/reference_data.csv")
+
                 features_list = [
-                    "category", "amt", "gender", "distance_achat", "age", "city_pop",
-                    "hour_sin", "hour_cos", "weekday_sin", "weekday_cos", "month_sin", "month_cos"
+                    "category",
+                    "amt",
+                    "gender",
+                    "distance_achat",
+                    "age",
+                    "city_pop",
+                    "hour_sin",
+                    "hour_cos",
+                    "weekday_sin",
+                    "weekday_cos",
+                    "month_sin",
+                    "month_cos",
                 ]
-                df_normal = df_ref[df_ref["is_fraud"] == 0].sample(n=800, random_state=42)
-                df_fraud = df_ref[df_ref["is_fraud"] == 1].sample(n=200, random_state=42)
-                df_sample_resorted = pd.concat([df_normal, df_fraud]).sample(frac=1.0, random_state=42).reset_index(drop=True)
-                
+                df_sample_resorted = get_hybrid_explain_sample()
+
                 X_samp = df_sample_resorted[features_list]
                 y_samp = df_sample_resorted["is_fraud"]
                 X_enc = preprocessor.transform(X_samp)
-                
-                # Traduction des variables pour la lisibilité
+
+                # Garantir que X_enc est un DataFrame avec des noms de colonnes valides
+                if hasattr(preprocessor, "get_feature_names_out"):
+                    cols = [
+                        c.split("__")[-1] for c in preprocessor.get_feature_names_out()
+                    ]
+                else:
+                    cols = X_samp.columns.tolist()
+
+                if not isinstance(X_enc, pd.DataFrame):
+                    X_enc = pd.DataFrame(X_enc, columns=cols)
+                else:
+                    X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
+                X_enc.index = df_sample_resorted["trans_num"].tolist()
+
+                features_groups = {
+                    "Heure": ["hour_sin", "hour_cos"],
+                    "Jour de la semaine": ["weekday_sin", "weekday_cos"],
+                    "Mois de l'année": ["month_sin", "month_cos"],
+                }
                 features_dict = {
                     "amt": "Montant (€)",
                     "distance_achat": "Distance d'achat (km)",
@@ -117,104 +279,71 @@ def load_shapash_explainer():
                     "city_pop": "Population de la ville",
                     "category": "Catégorie d'achat",
                     "gender": "Genre",
-                    "hour_sin": "Heure (trigonométrique sinus)",
-                    "hour_cos": "Heure (trigonométrique cosinus)",
-                    "weekday_sin": "Jour de la semaine (sinus)",
-                    "weekday_cos": "Jour de la semaine (cosinus)",
-                    "month_sin": "Mois de l'année (sinus)",
-                    "month_cos": "Mois de l'année (cosinus)"
                 }
+                xpl_obj = SmartExplainer(
+                    model=predictor,
+                    features_groups=features_groups,
+                    features_dict=features_dict,
+                )
 
-                xpl_obj = SmartExplainer(model=predictor, features_dict=features_dict)
-                
                 def dummy_get_interaction_values(selection=None, n_samples_max=None):
                     n_samp = len(selection) if selection is not None else 100
                     n_feat = X_enc.shape[1]
                     return np.zeros((n_samp, n_feat, n_feat))
-                    
+
                 xpl_obj.get_interaction_values = dummy_get_interaction_values
                 xpl_obj.compile(x=X_enc, y_target=y_samp)
-                return xpl_obj, df_sample_resorted, X_enc, champion_metrics, champion_params, "Dernier Run"
+                return (
+                    xpl_obj,
+                    df_sample_resorted,
+                    X_enc,
+                    champion_metrics,
+                    champion_params,
+                    "Dernier Run",
+                )
         except Exception as final_err:
-            st.error(f"Erreur critique lors de l'initialisation Shapash de secours : {final_err}")
+            st.error(
+                f"Erreur critique lors de l'initialisation Shapash de secours : {final_err}"
+            )
             return None, None, None, None, None, None
+
 
 with st.spinner("Chargement du modèle champion et calcul des contributions SHAP..."):
     xpl, df_sample, X_encoded, metrics, params, model_ver = load_shapash_explainer()
 
 if xpl is not None:
-    # --- GROUPEMENT DES VARIABLES CYCLIQUES ---
-    import numpy as np
-    
-    # 1. Recalcul des valeurs décodées humaines
-    angle_h = np.arctan2(xpl.x_init["hour_sin"], xpl.x_init["hour_cos"]) % (2 * np.pi)
-    xpl.x_init["Heure"] = np.round(angle_h * 12.0 / np.pi) % 24
-    
-    angle_w = np.arctan2(xpl.x_init["weekday_sin"], xpl.x_init["weekday_cos"]) % (2 * np.pi)
-    xpl.x_init["Jour de la semaine"] = np.round(angle_w * 3.5 / np.pi) % 7
-    
-    angle_m = np.arctan2(xpl.x_init["month_sin"], xpl.x_init["month_cos"]) % (2 * np.pi)
-    decoded_m = np.round(angle_m * 6.0 / np.pi)
-    decoded_m = np.where(decoded_m == 0, 12, decoded_m)
-    xpl.x_init["Mois de l'année"] = decoded_m
-    
-    # 2. Somme des contributions SHAP (gestion si c'est une liste de DataFrames pour classification binaire/multi)
-    to_drop = ["hour_sin", "hour_cos", "weekday_sin", "weekday_cos", "month_sin", "month_cos"]
-    if isinstance(xpl.contributions, list):
-        for c_df in xpl.contributions:
-            c_df["Heure"] = c_df["hour_sin"] + c_df["hour_cos"]
-            c_df["Jour de la semaine"] = c_df["weekday_sin"] + c_df["weekday_cos"]
-            c_df["Mois de l'année"] = c_df["month_sin"] + c_df["month_cos"]
-            c_df.drop(columns=to_drop, inplace=True)
-    else:
-        xpl.contributions["Heure"] = xpl.contributions["hour_sin"] + xpl.contributions["hour_cos"]
-        xpl.contributions["Jour de la semaine"] = xpl.contributions["weekday_sin"] + xpl.contributions["weekday_cos"]
-        xpl.contributions["Mois de l'année"] = xpl.contributions["month_sin"] + xpl.contributions["month_cos"]
-        xpl.contributions = xpl.contributions.drop(columns=to_drop)
-        
-    # 3. Suppression des variables sin/cos d'origine de x_init
-    xpl.x_init = xpl.x_init.drop(columns=to_drop)
-    
-    # Mise à jour de X_encoded (utilisé pour les sélecteurs de features)
-    X_encoded = X_encoded.drop(columns=to_drop)
-    X_encoded["Heure"] = xpl.x_init["Heure"]
-    X_encoded["Jour de la semaine"] = xpl.x_init["Jour de la semaine"]
-    X_encoded["Mois de l'année"] = xpl.x_init["Mois de l'année"]
-    
-    # 4. Alignement des dictionnaires Shapash
-    for col in to_drop:
-        if col in xpl.features_dict:
-            del xpl.features_dict[col]
-            
-    xpl.features_dict["Heure"] = "Heure de la transaction"
-    xpl.features_dict["Jour de la semaine"] = "Jour de la semaine"
-    xpl.features_dict["Mois de l'année"] = "Mois de l'année"
-    
-    xpl.columns_dict = {col: col for col in xpl.x_init.columns}
-    # ------------------------------------------
+    # Les variables cycliques (sin/cos) sont regroupées nativement par Shapash grâce à l'argument features_groups
+    available_features = [
+        col for col in X_encoded.columns if not any(x in col for x in ["sin", "cos"])
+    ]
+    available_features += ["Heure", "Jour de la semaine", "Mois de l'année"]
     # SECTION A : PERFORMANCES DU MODÈLE CHAMPION
     st.markdown(f"### 📊 Performances du modèle champion ({model_ver})")
-    
+
     c_m1, c_m2, c_m3, c_m4 = st.columns(4)
     with c_m1:
         st.metric("F1-Score Fraude (Classe 1)", f"{metrics.get('f1_class_1', 0.0):.4f}")
     with c_m2:
         st.metric("Rappel Fraude (Recall C1)", f"{metrics.get('rec_class_1', 0.0):.4f}")
     with c_m3:
-        st.metric("Précision Fraude (Prec C1)", f"{metrics.get('prec_class_1', 0.0):.4f}")
+        st.metric(
+            "Précision Fraude (Prec C1)", f"{metrics.get('prec_class_1', 0.0):.4f}"
+        )
     with c_m4:
         st.metric("F1 Macro (Global)", f"{metrics.get('F1_global', 0.0):.4f}")
-        
+
     st.markdown("**Paramètres clés du modèle :**")
     st.code(
         f"max_depth: {params.get('max_depth')}  |  learning_rate: {params.get('learning_rate')}  |  n_estimators: {params.get('n_estimators')}  |  scale_pos_weight: {params.get('scale_pos_weight')}"
     )
-    
+
     st.markdown("---")
-    
+
     # SECTION B : GLOBAL FEATURE IMPORTANCE PLOT
-    st.markdown("### 📈 1. Importance globale des caractéristiques (global feature importance)")
-    
+    st.markdown(
+        "### 📈 1. Importance globale des caractéristiques (global feature importance)"
+    )
+
     st.markdown(
         r"""
         > 💡 **Note de lisibilité sur les caractéristiques cycliques (temps) :**
@@ -235,14 +364,17 @@ if xpl is not None:
     )
     fig_global = xpl.plot.features_importance()
     st.plotly_chart(fig_global, use_container_width=True)
-    
+
     st.markdown("---")
-    
+
     # SECTION C : FEATURES CONTRIBUTION PLOTS
-    st.markdown("### 📈 2. Courbes de contribution individuelle (features contribution plots)")
-    st.write("Ces courbes affichent l'impact d'une caractéristique spécifique sur le score de fraude. Elles permettent de voir si des montants ou distances plus élevés augmentent le score de suspicion.")
-    
-    available_features = X_encoded.columns.tolist()
+    st.markdown(
+        "### 📈 2. Courbes de contribution individuelle (features contribution plots)"
+    )
+    st.write(
+        "Ces courbes affichent l'impact d'une caractéristique spécifique sur le score de fraude. Elles permettent de voir si des montants ou distances plus élevés augmentent le score de suspicion."
+    )
+
     selected_feature = st.selectbox(
         "Choisissez la caractéristique à analyser :",
         available_features,
@@ -250,39 +382,72 @@ if xpl is not None:
     )
     fig_contrib = xpl.plot.contribution_plot(selected_feature)
     st.plotly_chart(fig_contrib, use_container_width=True)
-    
+
     st.markdown("---")
-    
+
     # SECTION D : TRANSFORMATION INVERSE
     st.markdown("### 🔄 3. Transformation inverse (décodage des variables cycliques)")
-    st.write("Le modèle champion utilise des features cycliques trigonométriques pour comprendre le temps. Ci-dessous, l'outil décode ces valeurs en coordonnées d'origine (Heure, Jour de la semaine, Mois).")
-    
+    st.write(
+        "Le modèle champion utilise des features cycliques trigonométriques pour comprendre le temps. Ci-dessous, l'outil décode ces valeurs en coordonnées d'origine (Heure, Jour de la semaine, Mois)."
+    )
+
     selected_idx_inverse = st.number_input(
         f"Sélectionnez l'index de la transaction à décoder (0 à {len(df_sample) - 1}) :",
-        min_value=0, max_value=len(df_sample) - 1, value=0, key="inverse_tool_idx"
+        min_value=0,
+        max_value=len(df_sample) - 1,
+        value=0,
+        key="inverse_tool_idx",
     )
-    
+
     tx_inv = df_sample.iloc[selected_idx_inverse]
     encoded_inv = X_encoded.iloc[selected_idx_inverse]
-    
+
     angle_h = np.arctan2(tx_inv["hour_sin"], tx_inv["hour_cos"]) % (2 * np.pi)
     decoded_hour = int(np.round(angle_h * 12.0 / np.pi) % 24)
-    
+
     angle_w = np.arctan2(tx_inv["weekday_sin"], tx_inv["weekday_cos"]) % (2 * np.pi)
     decoded_weekday = int(np.round(angle_w * 3.5 / np.pi) % 7)
-    weekdays_names = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-    
+    weekdays_names = [
+        "Lundi",
+        "Mardi",
+        "Mercredi",
+        "Jeudi",
+        "Vendredi",
+        "Samedi",
+        "Dimanche",
+    ]
+
     angle_m = np.arctan2(tx_inv["month_sin"], tx_inv["month_cos"]) % (2 * np.pi)
     decoded_month = int(np.round(angle_m * 6.0 / np.pi))
     decoded_month = 12 if decoded_month == 0 else decoded_month
-    months_names = ["", "Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
-    
+    months_names = [
+        "",
+        "Janvier",
+        "Février",
+        "Mars",
+        "Avril",
+        "Mai",
+        "Juin",
+        "Juillet",
+        "Août",
+        "Septembre",
+        "Octobre",
+        "Novembre",
+        "Décembre",
+    ]
+
     col_enc, col_dec, col_orig = st.columns(3)
     with col_enc:
         st.markdown("**1. Valeurs Encodées**")
-        st.write(f"hour_sin/cos : `{tx_inv['hour_sin']:.4f}` / `{tx_inv['hour_cos']:.4f}`")
-        st.write(f"weekday_sin/cos : `{tx_inv['weekday_sin']:.4f}` / `{tx_inv['weekday_cos']:.4f}`")
-        st.write(f"month_sin/cos : `{tx_inv['month_sin']:.4f}` / `{tx_inv['month_cos']:.4f}`")
+        st.write(
+            f"hour_sin/cos : `{tx_inv['hour_sin']:.4f}` / `{tx_inv['hour_cos']:.4f}`"
+        )
+        st.write(
+            f"weekday_sin/cos : `{tx_inv['weekday_sin']:.4f}` / `{tx_inv['weekday_cos']:.4f}`"
+        )
+        st.write(
+            f"month_sin/cos : `{tx_inv['month_sin']:.4f}` / `{tx_inv['month_cos']:.4f}`"
+        )
     with col_dec:
         st.markdown("**2. Valeurs Décodées**")
         st.write(f"Heure : **`{decoded_hour} h`**")
@@ -294,30 +459,37 @@ if xpl is not None:
         st.write(f"Heure : **`{dt_orig.hour} h`**")
         st.write(f"Jour : **`{weekdays_names[dt_orig.dayofweek]}`**")
         st.write(f"Mois : **`{months_names[dt_orig.month]}`**")
-        
+
     st.markdown("---")
-    
+
     # SECTION E : LOCAL EXPLANATION (Waterfall)
     st.markdown("### 👤 4. Explication locale de la transaction")
-    st.write("Ce graphique montre le détail des contributions SHAP pour la transaction sélectionnée ci-dessus.")
-    
+    st.write(
+        "Ce graphique montre le détail des contributions SHAP pour la transaction sélectionnée ci-dessus."
+    )
+
     col_local_details, col_local_plot = st.columns([1, 2])
     with col_local_details:
         st.markdown("##### Paramètres d'Entrée")
-        st.write(f"💳 **Carte :** `{tx_inv['cc_num']}`")
+        st.write(f"🆔 **ID Transaction :** `{tx_inv['trans_num']}`")
+        import hashlib
+
+        cc_hash = hashlib.sha256(str(tx_inv["cc_num"]).encode()).hexdigest()
+        st.write(f"💳 **Carte (SHA-256) :** `{cc_hash[:16]}...`")
         st.write(f"💰 **Montant :** `{tx_inv['amt']} €`")
         st.write(f"🛍️ **Catégorie :** `{tx_inv['category']}`")
         st.write(f"🗺️ **Distance :** `{tx_inv['distance_achat']:.2f} km`")
         st.write(f"👤 **Âge/Genre :** `{tx_inv['age']} ans` (`{tx_inv['gender']}`)")
         st.write(f"🏙️ **Population :** `{tx_inv['city_pop']} hab.`")
-        
+
         if tx_inv["is_fraud"] == 1:
             st.error("🚨 FRAUDE RÉELLE")
         else:
             st.success("✅ SAINE RÉELLE")
-            
+
     with col_local_plot:
-        fig_local = xpl.plot.local_plot(index=selected_idx_inverse)
+        tx_id = tx_inv["trans_num"]
+        fig_local = xpl.plot.local_plot(index=tx_id)
         st.plotly_chart(fig_local, use_container_width=True)
 else:
     st.warning("L'explicateur Shapash n'a pas pu être chargé.")

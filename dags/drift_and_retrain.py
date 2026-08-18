@@ -33,7 +33,7 @@ def check_drift_evidently(**context):
 
 def trigger_hpo_and_retrain():
     """Exécute l'optimisation XGBoost, le réentraînement et la promotion sur Ray/MLflow"""
-    cmd = "docker exec -t fraud-detection-ray-head python src/training/optimize_xgb.py --n-trials 10 --sample-size -1"
+    cmd = "docker exec -t fraud-detection-ray-head python src/training/optimize_xgb.py --n-trials 100 --sample-size -1"
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     print(res.stdout)
     print(res.stderr)

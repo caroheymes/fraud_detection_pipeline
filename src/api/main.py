@@ -138,21 +138,21 @@ def compute_shap_values(model_pipeline, X):
     try:
         preprocessor = model_pipeline.named_steps["preprocessor"]
         predictor = model_pipeline.named_steps["model"]
-        
+
         # Encodage des features
         X_enc = preprocessor.transform(X)
         feature_names = list(preprocessor.get_feature_names_out())
-        
+
         # Convertir en DataFrame pour l'explication si c'est un tableau numpy
         if not isinstance(X_enc, pd.DataFrame):
             X_enc_df = pd.DataFrame(X_enc, columns=feature_names)
         else:
             X_enc_df = X_enc
-            
+
         # Explainer Tree SHAP
         explainer = shap.TreeExplainer(predictor)
         raw_shap = explainer.shap_values(X_enc_df)
-        
+
         # Adapter la dimension des SHAP values selon le format retourné
         if isinstance(raw_shap, list):
             if len(raw_shap) == 2:
@@ -161,12 +161,19 @@ def compute_shap_values(model_pipeline, X):
                 raw_shap = raw_shap[0]
         elif len(raw_shap.shape) == 3:
             raw_shap = raw_shap[:, :, 1]
-            
+
         # Extraire les features d'intérêt pour chaque ligne
         shap_dicts = []
         for i in range(len(X)):
             row_dict = {}
-            for col in ["amt", "distance_achat", "age", "city_pop", "hour_sin", "hour_cos"]:
+            for col in [
+                "amt",
+                "distance_achat",
+                "age",
+                "city_pop",
+                "hour_sin",
+                "hour_cos",
+            ]:
                 if col in feature_names:
                     idx = feature_names.index(col)
                     row_dict[col] = float(raw_shap[i, idx])
@@ -230,13 +237,12 @@ def save_predictions_to_db(
 
 # --- 5.5. ENVOI DE WEBHOOK AU MARCHAND EN CAS DE FRAUDE (ASYNCHRONE) ---
 def send_fraud_webhook(
-    transaction_data: dict,
-    prediction: int,
-    probability: float,
-    shap_values: dict
+    transaction_data: dict, prediction: int, probability: float, shap_values: dict
 ):
-    webhook_url = os.getenv("MERCHANT_WEBHOOK_URL", "http://localhost:8000/mock-merchant-webhook")
-    
+    webhook_url = os.getenv(
+        "MERCHANT_WEBHOOK_URL", "http://localhost:8000/mock-merchant-webhook"
+    )
+
     payload = {
         "event": "transaction.suspecte",
         "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -247,18 +253,24 @@ def send_fraud_webhook(
             "merchant": transaction_data.get("merchant"),
             "prediction": int(prediction),
             "prediction_proba": float(probability),
-            "explications_shap": shap_values
-        }
+            "explications_shap": shap_values,
+        },
     }
-    
+
     try:
         response = httpx.post(webhook_url, json=payload, timeout=5.0)
         if response.status_code in [200, 201, 202]:
-            print(f"[Webhook MLOps] Notification envoyée avec succès au marchand pour la transaction {transaction_data.get('trans_num')}.")
+            print(
+                f"[Webhook MLOps] Notification envoyée avec succès au marchand pour la transaction {transaction_data.get('trans_num')}."
+            )
         else:
-            print(f"[Webhook MLOps] Échec de l'envoi du webhook (code {response.status_code}).")
+            print(
+                f"[Webhook MLOps] Échec de l'envoi du webhook (code {response.status_code})."
+            )
     except Exception as e:
-        print(f"[Webhook MLOps] Erreur lors de l'envoi du webhook vers {webhook_url} : {e}")
+        print(
+            f"[Webhook MLOps] Erreur lors de l'envoi du webhook vers {webhook_url} : {e}"
+        )
 
 
 # --- 6. INITIALISATION AU DÉMARRAGE ---
@@ -312,16 +324,34 @@ def startup_event():
                 );
             """)
             )
-            
+
             # Ajout sécurisé des colonnes si la table pré-existait sans elles
             try:
-                conn.execute(text("ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS prediction_latency_ms NUMERIC(10, 4);"))
-                conn.execute(text("ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS shap_values JSONB;"))
-                conn.execute(text("ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_suspicion INT;"))
-                conn.execute(text("ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_score INT;"))
+                conn.execute(
+                    text(
+                        "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS prediction_latency_ms NUMERIC(10, 4);"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS shap_values JSONB;"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_suspicion INT;"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_score INT;"
+                    )
+                )
                 conn.commit()
             except Exception as schema_err:
-                print(f"[Postgres Schema Update] Erreur de mise à niveau de table : {schema_err}")
+                print(
+                    f"[Postgres Schema Update] Erreur de mise à niveau de table : {schema_err}"
+                )
 
             # S'assurer que les deux colonnes d'observabilité Fast Pass existent dans la table
             conn.execute(
@@ -582,14 +612,27 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
 @app.post("/mock-merchant-webhook")
 def mock_merchant_webhook(payload: dict):
     global redis_client
-    print(f"[Mock Merchant Server] Webhook reçu pour la transaction {payload['data']['transaction_id']}")
-    
+    print(
+        f"[Mock Merchant Server] Webhook reçu pour la transaction {payload['data']['transaction_id']}"
+    )
+
     if redis_client is not None:
         try:
-            # Enregistrement des alertes reçues dans Redis (historique des 10 dernières alertes)
-            redis_client.lpush("merchant_webhook_alerts", json.dumps(payload))
-            redis_client.ltrim("merchant_webhook_alerts", 0, 9)
+            import time
+
+            now = time.time()
+            # Nettoyer l'ancienne clé si elle était de type liste (migration propre)
+            if redis_client.type("merchant_webhook_alerts") == "list":
+                redis_client.delete("merchant_webhook_alerts")
+            # Enregistrement des alertes reçues dans un Sorted Set avec le timestamp epoch comme score
+            redis_client.zadd("merchant_webhook_alerts", {json.dumps(payload): now})
+            # Nettoyage automatique de toutes les alertes de plus de 24 heures (86400 secondes)
+            redis_client.zremrangebyscore(
+                "merchant_webhook_alerts", "-inf", now - 86400
+            )
         except Exception as redis_err:
-            print(f"[Mock Merchant Server] Échec de l'écriture dans Redis : {redis_err}")
-            
+            print(
+                f"[Mock Merchant Server] Échec de l'écriture dans Redis : {redis_err}"
+            )
+
     return {"status": "success", "message": "Webhook reçu et stocké dans Redis."}

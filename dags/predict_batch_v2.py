@@ -34,7 +34,7 @@ OUTPUT_DIR = "/opt/airflow/project/data"
 
 
 # ============================================================================
-# CORE PIPELINE PIPES (INGESTION TEMPS RÉEL)
+# CORE PIPELINE PIPES (INGESTION)
 # ============================================================================
 def ingest_data_from_queue(ti):
     """Tâche Airflow #1 — Ingestion temps réel des fichiers par lots dans ./data/queue"""
@@ -45,8 +45,8 @@ def ingest_data_from_queue(ti):
             "Le répertoire ./data/queue est vide. Aucune donnée à ingérer."
         )
 
-    # Prendre un lot (batch) de max 100 fichiers pour accélérer le traitement
-    batch_size = 100
+    # Prendre 1 seul fichier pour le traiter individuellement
+    batch_size = 1
     batch_files = queue_files[:batch_size]
     filenames = [os.path.basename(f) for f in batch_files]
 
@@ -97,20 +97,18 @@ def ingest_data_from_queue(ti):
 
 
 # ============================================================================
-# INFERENCE PIPELINE (ASYNC VIA GREQUESTS)
+# INFERENCE PIPELINE (BATCH PREDICT)
 # ============================================================================
 def trigger_batch_prediction(ti):
-    """Soumission en parallèle via GRequests d'un job d'inférence en batch"""
-    logger.info("Starting trigger_batch_prediction (GRequests v2)...")
-    import grequests
+    """Soumission d'un job d'inférence pour le fichier en cours."""
+    logger.info("Starting trigger_batch_prediction...")
     import pandas as pd
+    import requests
 
     batch_info_path = os.path.join(OUTPUT_DIR, "current_batch.json")
     with open(batch_info_path, "r") as f:
         filenames = json.load(f)
 
-    # Préparer les requêtes en parallèle pour chaque fichier du lot
-    reqs = []
     numeric_cols = [
         "amt",
         "lat",
@@ -129,8 +127,12 @@ def trigger_batch_prediction(ti):
         file_path = os.path.join(OUTPUT_DIR, "queue", filename)
         if os.path.exists(file_path):
             try:
-                # Lecture en string pour contourner le segfault de pandas sur cc_num à 19 chiffres
+                # Lecture du fichier
                 df = pd.read_csv(file_path, dtype=str)
+                if len(df) == 0:
+                    logger.info(f"Le fichier {filename} est vide. Appel API ignoré.")
+                    continue
+
                 for col in numeric_cols:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -138,45 +140,28 @@ def trigger_batch_prediction(ti):
                 data_json = df.to_dict(orient="records")
                 payload = {"transactions": data_json}
 
-                # Ajout de la requête POST non envoyée à la liste grequests
-                reqs.append(grequests.post(submit_url, json=payload, timeout=60))
+                logger.info(
+                    f"Soumission du fichier {filename} ({len(data_json)} transactions) à {submit_url}..."
+                )
+                r = requests.post(submit_url, json=payload, timeout=60)
+                r.raise_for_status()
+                result = r.json()
+                logger.info(
+                    f"Prédictions API reçues avec succès (status: {result.get('status')})"
+                )
             except Exception as e:
-                logger.error(f"Erreur lors de la lecture du fichier {filename} : {e}")
+                logger.error(
+                    f"Erreur lors de la prédiction pour le fichier {filename} : {e}"
+                )
                 raise
 
-    if not reqs:
-        logger.warning("Aucune donnée trouvée dans le batch de fichiers.")
-        return
-
-    logger.info(
-        f"Envoi de {len(reqs)} requêtes de prédiction en parallèle via GRequests à {submit_url}..."
-    )
-    responses = grequests.map(reqs)
-
-    logger.info(
-        "Toutes les requêtes parallèles ont été émises. Vérification des réponses..."
-    )
-    for i, r in enumerate(responses):
-        if r is None:
-            logger.error(
-                f"La requête {i} pour le fichier {filenames[i]} a échoué (Pas de réponse / Timeout)"
-            )
-            raise RuntimeError(
-                f"La requête {i} pour le fichier {filenames[i]} a échoué"
-            )
-        r.raise_for_status()
-        result = r.json()
-        logger.info(
-            f"Prédictions API [{i}] ({filenames[i]}) reçues avec succès (status: {result.get('status')})"
-        )
-
 
 # ============================================================================
-# SUPPRESSION DU FICHIER DE LA FILE D'ATTENTE APRÈS TRAITEMENT
+# SUPPRESSION DU FICHIER DE LA FILE D'ATTENTE
 # ============================================================================
 def delete_processed_file(ti):
-    """Tâche Airflow — Suppression des fichiers du batch après traitement"""
-    logger.info("Suppression des fichiers du batch après traitement...")
+    """Tâche Airflow — Suppression du fichier après traitement"""
+    logger.info("Suppression du fichier après traitement...")
 
     batch_info_path = os.path.join(OUTPUT_DIR, "current_batch.json")
     with open(batch_info_path, "r") as f:
@@ -226,19 +211,19 @@ default_args = {
     "depends_on_past": False,
     "email_on_failure": False,
     "email_on_retry": False,
-    "retries": 2,
+    "retries": 1,
     "retry_delay": timedelta(seconds=5),
 }
 
 with DAG(
     dag_id="test_ingest_parallel_requests",
     default_args=default_args,
-    description="Inférence parallélisée avec GRequests sur les données de fraude",
+    description="Inférence séquentielle avec affichage des tâches séparées dans l'UI",
     schedule=None,
     start_date=datetime(2019, 1, 1),
     catchup=False,
     max_active_runs=1,
-    tags=["fraud-detection", "pipeline", "grequests", "predict"],
+    tags=["fraud-detection", "pipeline", "predict"],
 ) as dag:
     ingest_task = PythonOperator(
         task_id="ingest_data_from_queue",
@@ -255,24 +240,21 @@ with DAG(
         python_callable=delete_processed_file,
     )
 
-    # Tâche d'évaluation de la boucle
     check_queue_task = BranchPythonOperator(
         task_id="check_queue",
         python_callable=check_queue_func,
     )
 
-    # Si la queue contient des fichiers, on auto-déclenche ce DAG
     trigger_next_run = TriggerDagRunOperator(
         task_id="trigger_next_run",
-        trigger_dag_id="predict_batchV2",
+        trigger_dag_id="test_ingest_parallel_requests",
         wait_for_completion=False,
     )
 
-    # Si la queue est vide, on s'arrête proprement
     end_simulation = EmptyOperator(
         task_id="end_simulation",
     )
 
-    # Définition des dépendances séquentielles
+    # Enchaînement des tâches
     ingest_task >> predict_task >> delete_task >> check_queue_task
     check_queue_task >> [trigger_next_run, end_simulation]

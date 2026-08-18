@@ -1,0 +1,15 @@
+flowchart LR
+    A{"🔍 audit_drift<br/><i>Evidently — detect_drift.py<br/>Comparaison référence vs courant</i>"}
+    B["🧠 trigger_hpo_and_retrain<br/><i>Optuna HPO (10 trials)<br/>XGBoost réentraîné<br/>Promotion MLflow</i>"]
+    C["⏭️ skip_retrain<br/><i>Pas de drift détecté</i>"]
+    D["📤 export_rules<br/><i>SHAP → seuils de suspicion<br/>Mise à jour Redis + JSON</i>"]
+
+    A -->|"Drift détecté ⚠️"| B
+    A -->|"Pas de drift ✅"| C
+    B --> D
+    C --> D
+
+    style A fill:#fff3e0,stroke:#e65100,color:#333
+    style B fill:#fce4ec,stroke:#c62828,color:#333
+    style C fill:#e8f5e9,stroke:#2e7d32,color:#333
+    style D fill:#e3f2fd,stroke:#1565c0,color:#333

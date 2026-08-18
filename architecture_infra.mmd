@@ -1,0 +1,56 @@
+graph TB
+    subgraph INFRA["🐳 INFRASTRUCTURE DOCKER"]
+
+        subgraph LAYER1["1 · COUCHE DONNÉES"]
+            POSTGRES[("PostgreSQL 15<br/><b>Bronze / Silver / Gold</b><br/>port 5433")]
+            REDIS[("Redis 7<br/><b>Online Store</b><br/>port 6381")]
+        end
+
+        subgraph LAYER2["2 · COUCHE TRACKING"]
+            MLFLOW["MLflow Server<br/><b>Model Registry</b><br/>port 5001"]
+        end
+
+        subgraph LAYER3["3 · COUCHE CALCUL DISTRIBUÉ"]
+            RAY_HEAD["Ray Head<br/><b>FastAPI + Dashboard</b><br/>port 8001 / 8266"]
+            RAY_WORKER["Ray Worker<br/><b>GPU NVIDIA</b><br/>2 CPUs · 9 Go"]
+        end
+
+        subgraph LAYER4["4 · COUCHE ORCHESTRATION — Airflow"]
+            AF_WEB["API Server<br/>port 8082"]
+            AF_SCHED["Scheduler"]
+            AF_DAG["DAG Processor"]
+            DAG1["📋 batch_prediction_pipeline<br/><i>toutes les minutes</i>"]
+            DAG2["📋 drift_and_retrain_loop<br/><i>quotidien à 02h00</i>"]
+        end
+
+    end
+
+    AF_WEB --- AF_SCHED
+    AF_WEB --- AF_DAG
+    AF_SCHED --> DAG1
+    AF_SCHED --> DAG2
+
+    DAG1 -->|"SQL ingestion"| POSTGRES
+    DAG1 -->|"HTTP POST /predict_batch"| RAY_HEAD
+
+    DAG2 -->|"docker exec detect_drift"| RAY_HEAD
+    DAG2 -->|"docker exec optimize_xgb"| RAY_HEAD
+
+    RAY_HEAD --- RAY_WORKER
+    RAY_HEAD -->|"log expériences"| MLFLOW
+    RAY_HEAD -->|"écriture prédictions"| POSTGRES
+    RAY_HEAD -->|"règles SHAP"| REDIS
+
+    MLFLOW -->|"backend store"| POSTGRES
+
+    classDef data fill:#fef7e0,stroke:#f9ab00,stroke-width:2px,color:#333
+    classDef tracking fill:#e8f5e9,stroke:#34a853,stroke-width:2px,color:#333
+    classDef compute fill:#fce4ec,stroke:#ea4335,stroke-width:2px,color:#333
+    classDef orchestration fill:#f3e8fd,stroke:#9334e6,stroke-width:2px,color:#333
+    classDef dag fill:#ede7f6,stroke:#7e57c2,stroke-width:1px,color:#333
+
+    class POSTGRES,REDIS data
+    class MLFLOW tracking
+    class RAY_HEAD,RAY_WORKER compute
+    class AF_WEB,AF_SCHED,AF_DAG orchestration
+    class DAG1,DAG2 dag
