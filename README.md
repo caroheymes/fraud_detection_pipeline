@@ -70,6 +70,22 @@ La boucle automatique d'Airflow effectue quotidiennement les tâches suivantes :
 2. **Réentraînement** : Si la dérive des données est supérieure au seuil Evidently, `src/training/train.py` est lancé sur le cluster Ray.
 3. **Mise à jour** : Le modèle est versionné dans MLflow, sauvegardé sur disque et automatiquement rechargé par FastAPI.
 
+## 🛡️ Conformité réglementaire & Sécurité (RGPD, AI Act, PCI-DSS)
+
+Notre pipeline intègre les contraintes de sécurité et de conformité réglementaires par design :
+
+* **PCI-DSS (Données bancaires)** : 
+  * Les numéros de cartes de crédit (`cc_num`) sont hachés de manière irréversible avec l'algorithme cryptographique **SHA-256** (`cc_num_sha256`) avant tout affichage dans le Dashboard Streamlit, écriture dans les logs, ou transmission dans le corps des webhooks marchands.
+* **RGPD (Données personnelles)** :
+  * **Minimisation des données (Art. 5)** : Le stockage des contributions locales SHAP est **sélectif**. Les transactions saines (99% du trafic) sont enregistrées avec la valeur `NULL` en base PostgreSQL, évitant la constitution automatique de profils comportementaux de masse inutiles.
+  * **Durée de conservation (Rétention)** : Les alertes webhooks en temps réel enregistrées dans le cache Redis appliquent une politique d'expiration stricte de **24 heures glissantes**.
+  * **Droit à l'explication (Art. 22)** : L'application Streamlit intègre les explications locales **Shapash** (graphique Waterfall Plotly) pour justifier et retracer de manière compréhensible chaque décision automatisée de blocage ou d'alerte.
+* **AI Act (Régulation européenne de l'IA)** :
+  * **Transparence & Robustesse** : Le système surveille de façon continue la dérive des données de production (**Evidently AI**) comparant les transactions du jour à une période de référence glissante de 30 jours pour prévenir la dégradation des performances.
+  * **Contrôle Humain & Traçabilité** : L'explicabilité locale et le suivi rigoureux de toutes les métadonnées d'entraînement et d'évaluation dans **MLflow** garantissent la traçabilité complète des versions du modèle champion promues en production.
+
+---
+
 ## Liens et demo
 
 • FastApi : http://localhost:8001/docs#/
