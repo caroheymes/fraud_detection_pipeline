@@ -243,7 +243,7 @@ def save_predictions_to_db(
         t_param["fast_pass_suspicion"] = int(fast_pass_suspicions[i])
         t_param["fast_pass_score"] = int(fast_pass_scores[i])
         t_param["prediction_latency_ms"] = float(prediction_latency_ms)
-        t_param["shap_values"] = json.dumps(shap_values_list[i])
+        t_param["shap_values"] = json.dumps(shap_values_list[i]) if shap_values_list[i] is not None else None
         params_list.append(t_param)
 
     try:
@@ -583,9 +583,18 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     prediction_latency_ms = ((end_time - start_time) * 1000.0) / max(1, len(df))
 
     # ==========================================================
-    # 5.5 CALCUL DES CONTRIBUTIONS SHAP LOCALES
+    # 5.5 CALCUL SÉLECTIF DES CONTRIBUTIONS SHAP LOCALES
     # ==========================================================
-    shap_values_list = compute_shap_values(model_pipeline, X)
+    shap_values_list = [None] * len(df)
+    suspicious_indices = [
+        idx for idx in range(len(df))
+        if predictions[idx] == 1 or fast_pass_suspicions[idx] == 1
+    ]
+    if suspicious_indices:
+        X_suspicious = X.iloc[suspicious_indices]
+        shap_suspicious = compute_shap_values(model_pipeline, X_suspicious)
+        for idx, s_idx in enumerate(suspicious_indices):
+            shap_values_list[s_idx] = shap_suspicious[idx]
 
     # ==========================================================
     # 6. ENREGISTREMENT ASYNCHRONE DANS LA BASE POSTGRES
