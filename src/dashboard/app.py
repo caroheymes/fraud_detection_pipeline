@@ -86,12 +86,41 @@ with c1:
         st.warning("🟡 Moteurs de suspicion Redis (Fast Pass) : **Non disponible**")
 
     # Statut Evidently AI (Dérive des données)
-    st.info(
-        "📈 **Evidently AI (Statut de Drift)** : `Stable` (Aucun drift global détecté)"
-    )
-    st.markdown(
-        "**Dernière vérification :** Aujourd'hui à 02:00 (prochaine demain à 02:00)"
-    )
+    drift_report_path = "src/training/drift_report.json"
+    drift_loaded = False
+    
+    if os.path.exists(drift_report_path):
+        try:
+            with open(drift_report_path, "r") as f:
+                drift_data = json.load(f)
+            drift_loaded = True
+        except Exception:
+            pass
+            
+    if drift_loaded:
+        drift_detected = drift_data.get("drift_detected", False)
+        mean_ratio = drift_data.get("mean_drift_ratio", 0.0)
+        curr_date = drift_data.get("current_date", "N/A")
+        sample_sz = drift_data.get("sample_size", 0)
+        
+        if drift_detected:
+            st.error(f"🚨 **Evidently AI (Statut de Drift)** : **Dérive détectée !** ({mean_ratio * 100:.1f}% des variables dérivent)")
+        else:
+            st.success(f"🟢 **Evidently AI (Statut de Drift)** : **Stable** (Aucun drift global détecté)")
+            
+        st.markdown(f"**Dernière vérification (date simulée) :** `{curr_date}` | **Échantillon :** `{sample_sz} tx`")
+        
+        # Détails par variable dans un expander
+        with st.expander("👁️ Voir le détail des scores par variable"):
+            for col, detail in drift_data.get("details", {}).items():
+                status_icon = "🚨" if detail.get("drift_detected") else "✅"
+                metric_val = detail.get("metric_value", 0.0)
+                threshold = detail.get("threshold", 0.1)
+                method = detail.get("method", "N/A")
+                st.write(f"{status_icon} **{col}** : score = `{metric_val:.4f}` (seuil = `{threshold}`, méthode = `{method}`)")
+    else:
+        st.info("📈 **Evidently AI (Statut de Drift)** : `Stable` (Aucun drift global détecté)")
+        st.markdown("**Dernière vérification :** Aujourd'hui à 02:00 (prochaine demain à 02:00)")
 
 with c2:
     st.subheader("🏆 Modèle champion actif")
