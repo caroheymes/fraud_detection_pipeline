@@ -85,42 +85,6 @@ with c1:
     else:
         st.warning("🟡 Moteurs de suspicion Redis (Fast Pass) : **Non disponible**")
 
-    # Statut Evidently AI (Dérive des données)
-    drift_report_path = "src/training/drift_report.json"
-    drift_loaded = False
-    
-    if os.path.exists(drift_report_path):
-        try:
-            with open(drift_report_path, "r") as f:
-                drift_data = json.load(f)
-            drift_loaded = True
-        except Exception:
-            pass
-            
-    if drift_loaded:
-        drift_detected = drift_data.get("drift_detected", False)
-        mean_ratio = drift_data.get("mean_drift_ratio", 0.0)
-        curr_date = drift_data.get("current_date", "N/A")
-        sample_sz = drift_data.get("sample_size", 0)
-        
-        if drift_detected:
-            st.error(f"🚨 **Evidently AI (Statut de Drift)** : **Dérive détectée !** ({mean_ratio * 100:.1f}% des variables dérivent)")
-        else:
-            st.success(f"🟢 **Evidently AI (Statut de Drift)** : **Stable** (Aucun drift global détecté)")
-            
-        st.markdown(f"**Dernière vérification (date simulée) :** `{curr_date}` | **Échantillon :** `{sample_sz} tx`")
-        
-        # Détails par variable dans un expander
-        with st.expander("👁️ Voir le détail des scores par variable"):
-            for col, detail in drift_data.get("details", {}).items():
-                status_icon = "🚨" if detail.get("drift_detected") else "✅"
-                metric_val = detail.get("metric_value", 0.0)
-                threshold = detail.get("threshold", 0.1)
-                method = detail.get("method", "N/A")
-                st.write(f"{status_icon} **{col}** : score = `{metric_val:.4f}` (seuil = `{threshold}`, méthode = `{method}`)")
-    else:
-        st.info("📈 **Evidently AI (Statut de Drift)** : `Stable` (Aucun drift global détecté)")
-        st.markdown("**Dernière vérification :** Aujourd'hui à 02:00 (prochaine demain à 02:00)")
 
 with c2:
     st.subheader("🏆 Modèle champion actif")
@@ -170,6 +134,49 @@ with c2:
         st.markdown("* **Précision de référence :** `0.8272`")
         st.markdown("* **F1-Score de référence :** `0.8701`")
         st.markdown("* **F1 Global de référence :** `0.9348`")
+
+st.markdown("---")
+st.markdown("### 📈 Observabilité de dérive des données (Evidently AI)")
+
+# Statut Evidently AI (Dérive des données)
+drift_report_path = "src/training/drift_report.json"
+drift_loaded = False
+
+if os.path.exists(drift_report_path):
+    try:
+        with open(drift_report_path, "r") as f:
+            drift_data = json.load(f)
+        drift_loaded = True
+    except Exception:
+        pass
+        
+if drift_loaded:
+    drift_detected = drift_data.get("drift_detected", False)
+    mean_ratio = drift_data.get("mean_drift_ratio", 0.0)
+    curr_date = drift_data.get("current_date", "N/A")
+    
+    if drift_detected:
+        st.error(f"🚨 **Statut de Drift** : **Dérive détectée !** ({mean_ratio * 100:.1f}% des variables dérivent)")
+    else:
+        st.success("🟢 **Statut de Drift** : **Stable** (Aucun drift global détecté)")
+        
+    st.markdown(f"**Dernière vérification :** `{curr_date}`")
+    
+    # Rendu direct du rapport interactif HTML d'Evidently AI
+    html_report_path = "src/training/evidently_drift_report.html"
+    if os.path.exists(html_report_path):
+        try:
+            with open(html_report_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            import streamlit.components.v1 as components
+            components.html(html_content, height=1000, scrolling=True)
+        except Exception as html_err:
+            st.error(f"Erreur d'affichage du rapport HTML : {html_err}")
+    else:
+        st.warning("Le rapport HTML interactif n'a pas été trouvé.")
+else:
+    st.info("📈 **Evidently AI (Statut de Drift)** : `Stable` (Aucun drift global détecté)")
+    st.markdown("**Dernière vérification :** Aujourd'hui à 02:00 (prochaine demain à 02:00)")
 
 # Barre latérale de configuration générale
 st.sidebar.header("⚙️ Contrôles globaux")
