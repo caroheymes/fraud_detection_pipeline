@@ -17,6 +17,31 @@ st.write(
 )
 st.markdown("---")
 
+# --- Section de simulation & cURL ---
+with st.expander("🛠️ Espace de test & Intégration API Marchand (cURL)"):
+    st.write("Les marchands partenaires reçoivent des notifications webhooks en temps réel lors de suspicions de fraude. Vous pouvez simuler manuellement l'arrivée d'une alerte en appelant l'endpoint de réception :")
+    st.code("https://fraud-detection.ngrok.app/mock-merchant-webhook", language="text")
+    
+    st.write("Voici un exemple de commande **cURL** incluant un **Auth-Token de sécurité (X-Merchant-Token)** et le **numéro de carte chiffré par SHA-256** :")
+    
+    import hashlib
+    cc_sha = hashlib.sha256(b"423578912345").hexdigest()
+    token_sha = hashlib.sha256(b"merchant_secret_key_2026").hexdigest()
+    
+    mock_request = {
+        "transaction_id": "simulated_tx_web_999"
+    }
+    request_str = json.dumps(mock_request, indent=2)
+    
+    st.code(f"""curl -X POST "https://fraud-detection.ngrok.app/mock-merchant-webhook" \\
+  -H "Content-Type: application/json" \\
+  -H "X-Merchant-Token: {token_sha}" \\
+  -d '{request_str}'""", language="bash")
+    
+    st.write("💡 **Fonctionnement interne** : Lorsque vous envoyez cette commande, le serveur API interroge sa base de données pour charger toutes les caractéristiques réelles de la transaction, chiffre le numéro de carte bancaire par SHA-256 et renvoie la notification webhook enrichie complète en réponse (que vous verrez s'afficher ci-dessous après rafraîchissement).")
+    
+st.markdown("---")
+
 
 def query_db(query):
     import psycopg2

@@ -39,7 +39,7 @@ shéma simplifié : ingestion, inférence, réentrainement
 
 Schéma d'architecture complet du pipeline en temps réel, incluant le Fast-Path avec Redis Cache, le calcul d'explicabilité Shapash, et la boucle de drift/réentraînement :
 
-![Architecture du Pipeline](./pipeline.png)
+![Architecture du Pipeline](./pipeline_v3.png)
 
 ---
 
