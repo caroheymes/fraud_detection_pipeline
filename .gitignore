@@ -86,6 +86,9 @@ src/training/reference_data.csv
 # Architecture diagrams and design files
 *.mmd
 *.eraser
+pipeline_V2.png
+pipeline_haut_niveau.png
+demo dag OK.mp4
 
 # Office temporary/lock files
 ~$*
