@@ -121,6 +121,12 @@ def main():
         file_name = f"step_{i + 1:02d}_{formatted_start}.csv"
         file_path = os.path.join(queue_dir, file_name)
 
+        if df_bin.empty:
+            print(
+                f" -> [{i + 1:02d}/{args.steps}] {file_name} : Ignoré (aucune transaction sur cet intervalle)."
+            )
+            continue
+
         df_bin.to_csv(file_path, index=False)
         print(
             f" -> [{i + 1:02d}/{args.steps}] {file_name} : {len(df_bin)} transactions écrites."
