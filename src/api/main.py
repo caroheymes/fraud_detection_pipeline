@@ -464,6 +464,9 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     if model_pipeline is None:
         return {"status": "error", "message": "Le modèle n'est pas chargé en mémoire."}
 
+    if not batch.transactions:
+        return {"status": "success", "predictions": []}
+
     # 1. Conversion du batch Pydantic en DataFrame pandas
     transactions_list = [t.dict() for t in batch.transactions]
     df = pd.DataFrame(transactions_list)

@@ -154,3 +154,56 @@ def test_api_predict_batch_schema():
     # Vérification que le Fast Pass s'est déclenché dans les métriques renvoyées
     assert prediction_result["fast_pass_suspicion"] == 1
     assert prediction_result["fast_pass_score"] >= 4
+
+
+def test_ingest_parallel_requests():
+    """Simule des requêtes d'ingestion parallèles pour valider la robustesse de l'API sous charge"""
+    import concurrent.futures
+    
+    payload = {
+        "transactions": [
+            {
+                "trans_date_trans_time": "2020-07-22 23:05:00",
+                "cc_num": 123456789,
+                "merchant": "fraud_gas_station",
+                "category": "travel",
+                "amt": 500.0,
+                "first": "Caro",
+                "last": "MS",
+                "gender": "F",
+                "street": "12 rue de la Paix",
+                "city": "Lyon",
+                "state": "Rhone",
+                "zip": 69000,
+                "lat": 45.764043,
+                "long": 4.835659,
+                "city_pop": 513000,
+                "job": "Data Ingé",
+                "dob": "1985-04-12",
+                "trans_num": "test_tx_parallel",
+                "unix_time": 1595426700,
+                "merch_lat": 45.768000,
+                "merch_long": 4.840000,
+                "is_fraud": 0,
+            }
+        ]
+    }
+
+    num_threads = 10
+
+    def send_request(i):
+        req_payload = payload.copy()
+        req_payload["transactions"] = [t.copy() for t in payload["transactions"]]
+        req_payload["transactions"][0]["trans_num"] = f"test_tx_parallel_{i}"
+        return client.post("/predict_batch", json=req_payload)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = [executor.submit(send_request, i) for i in range(num_threads)]
+        results = [f.result() for f in futures]
+
+    for response in results:
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "success"
+        assert len(data["predictions"]) == 1
+

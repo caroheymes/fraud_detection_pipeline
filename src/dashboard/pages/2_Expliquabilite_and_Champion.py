@@ -175,6 +175,7 @@ def load_shapash_explainer():
         else:
             X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
         X_enc.index = df_sample_resorted["trans_num"].tolist()
+        y_samp.index = X_enc.index
 
         features_groups = {
             "Heure": ["hour_sin", "hour_cos"],
@@ -266,6 +267,7 @@ def load_shapash_explainer():
                 else:
                     X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
                 X_enc.index = df_sample_resorted["trans_num"].tolist()
+                y_samp.index = X_enc.index
 
                 features_groups = {
                     "Heure": ["hour_sin", "hour_cos"],
