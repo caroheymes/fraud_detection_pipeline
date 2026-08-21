@@ -164,6 +164,10 @@ def delete_processed_file(ti):
     logger.info("Suppression du fichier après traitement...")
 
     batch_info_path = os.path.join(OUTPUT_DIR, "current_batch.json")
+    if not os.path.exists(batch_info_path):
+        logger.warning(f"Le fichier d'information du batch {batch_info_path} n'existe pas. Rien à supprimer.")
+        return
+
     with open(batch_info_path, "r") as f:
         filenames = json.load(f)
 
