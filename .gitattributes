@@ -1,0 +1,4 @@
+# Ignore les rapports HTML générés d'Evidently AI dans les statistiques de langages de GitHub
+src/training/evidently_drift_report.html linguist-generated=true
+src/training/*.html linguist-generated=true
+*.html linguist-generated=true
