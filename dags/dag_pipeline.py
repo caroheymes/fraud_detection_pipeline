@@ -114,6 +114,10 @@ def trigger_batch_prediction(ti):
     import requests
 
     batch_info_path = os.path.join(OUTPUT_DIR, "current_batch.json")
+    if not os.path.exists(batch_info_path):
+        logger.warning(f"Le fichier d'information du batch {batch_info_path} n'existe pas. Inférence ignorée.")
+        return
+
     with open(batch_info_path, "r") as f:
         filenames = json.load(f)
 
