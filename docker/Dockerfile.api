@@ -9,9 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+COPY requirements-ml.txt .
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-RUN  --mount=type=cache,target=/root/.cache/uv uv pip install --system -r requirements.txt
+RUN  --mount=type=cache,target=/root/.cache/uv uv pip install --system -r requirements-ml.txt
 # RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 
 COPY . .
