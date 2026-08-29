@@ -183,8 +183,7 @@ def delete_processed_file(ti):
                 os.remove(file_path)
                 logger.info(f"Fichier {filename} supprimé physiquement de la queue.")
             else:
-                logger.warning(f"Fichier {filename} introuvable pour suppression.")
-                errors.append(filename)
+                logger.warning(f"Fichier {filename} introuvable pour suppression (déjà supprimé ?).")
         except Exception as e:
             logger.error(f"Erreur lors de la suppression du fichier {filename} : {e}")
             errors.append(filename)

@@ -142,6 +142,7 @@ class WebhookRequest(BaseModel):
 # Variables globales pour le modèle ML
 model_pipeline = None
 model_run_id = "unknown"
+DECISION_THRESHOLD = float(os.getenv("DECISION_THRESHOLD", "0.75"))
 
 
 # --- 4. FONCTIONS DE CALCUL AUXILIAIRES ---
@@ -195,6 +196,10 @@ def compute_shap_values(model_pipeline, X):
                 "city_pop",
                 "hour_sin",
                 "hour_cos",
+                "weekday_sin",
+                "weekday_cos",
+                "month_sin",
+                "month_cos",
             ]:
                 if col in feature_names:
                     idx = feature_names.index(col)
@@ -575,8 +580,8 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     # ==========================================================
     start_time = time.time()
     try:
-        predictions = model_pipeline.predict(X)
         probabilities = model_pipeline.predict_proba(X)[:, 1]
+        predictions = (probabilities >= DECISION_THRESHOLD).astype(int)
     except Exception as ml_err:
         return {
             "status": "error",

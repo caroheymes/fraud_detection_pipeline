@@ -279,6 +279,43 @@ else:
                 },
             )
             st.plotly_chart(fig_m, use_container_width=True)
+
+            st.markdown("#### 📅 Évolution mensuelle du taux de fraude")
+            df_monthly_metrics, err_monthly_metrics = query_db(
+                "SELECT * FROM gold.mart_merchant_monthly_metrics ORDER BY transaction_month ASC"
+            )
+            if not err_monthly_metrics and df_monthly_metrics is not None and not df_monthly_metrics.empty:
+                if active_merchants:
+                    df_monthly_metrics = df_monthly_metrics[df_monthly_metrics["merchant_name"].isin(active_merchants)]
+                
+                if df_monthly_metrics.empty:
+                    st.warning("Aucune donnée mensuelle disponible pour les marchands sélectionnés.")
+                else:
+                    df_monthly_grouped = df_monthly_metrics.groupby("transaction_month").agg(
+                        {
+                            "total_transactions": "sum",
+                            "fraud_transactions_count": "sum",
+                            "total_volume": "sum",
+                            "blocked_fraud_volume": "sum",
+                        }
+                    ).reset_index()
+                    df_monthly_grouped["fraud_rate_percentage"] = round(
+                        (df_monthly_grouped["fraud_transactions_count"] / df_monthly_grouped["total_transactions"]) * 100,
+                        2
+                    )
+                    
+                    df_monthly_grouped["transaction_month"] = df_monthly_grouped["transaction_month"].astype(str)
+                    
+                    fig_monthly_rate = px.line(
+                        df_monthly_grouped,
+                        x="transaction_month",
+                        y="fraud_rate_percentage",
+                        title="Évolution du Taux de Fraude Mensuel (%) (Périmètre filtré)",
+                        labels={"transaction_month": "Mois", "fraud_rate_percentage": "Taux de Fraude (%)"},
+                        markers=True,
+                    )
+                    fig_monthly_rate.update_traces(line=dict(color="#e74c3c", width=3))
+                    st.plotly_chart(fig_monthly_rate, use_container_width=True)
     else:
         st.warning("La table de métriques journalières marchands est vide.")
 
@@ -329,27 +366,29 @@ if target_merchant:
         preprocessor, predictor = load_champion_explainer_assets()
 
         if preprocessor is not None and predictor is not None:
-            tx_row = tx_row.copy()
-            tx_row["trans_date_trans_time"] = pd.to_datetime(
-                tx_row["trans_date_trans_time"]
+            df_tx_list_proc = df_tx_list.copy()
+            df_tx_list_proc.index = df_tx_list_proc["trans_num"].tolist()
+
+            df_tx_list_proc["trans_date_trans_time"] = pd.to_datetime(
+                df_tx_list_proc["trans_date_trans_time"]
             )
-            tx_row["dob"] = pd.to_datetime(tx_row["dob"])
-            tx_row["age"] = (
-                tx_row["trans_date_trans_time"].dt.year - tx_row["dob"].dt.year
+            df_tx_list_proc["dob"] = pd.to_datetime(df_tx_list_proc["dob"])
+            df_tx_list_proc["age"] = (
+                df_tx_list_proc["trans_date_trans_time"].dt.year - df_tx_list_proc["dob"].dt.year
             )
-            tx_row["distance_achat"] = haversine_vectorized(
-                float(tx_row["lat"].iloc[0]),
-                float(tx_row["long"].iloc[0]),
-                float(tx_row["merch_lat"].iloc[0]),
-                float(tx_row["merch_long"].iloc[0]),
+            df_tx_list_proc["distance_achat"] = haversine_vectorized(
+                df_tx_list_proc["lat"].astype(float),
+                df_tx_list_proc["long"].astype(float),
+                df_tx_list_proc["merch_lat"].astype(float),
+                df_tx_list_proc["merch_long"].astype(float),
             )
-            dt_col = tx_row["trans_date_trans_time"]
-            tx_row["hour_sin"] = np.sin(2 * np.pi * dt_col.dt.hour / 24.0)
-            tx_row["hour_cos"] = np.cos(2 * np.pi * dt_col.dt.hour / 24.0)
-            tx_row["weekday_sin"] = np.sin(2 * np.pi * dt_col.dt.dayofweek / 7.0)
-            tx_row["weekday_cos"] = np.cos(2 * np.pi * dt_col.dt.dayofweek / 7.0)
-            tx_row["month_sin"] = np.sin(2 * np.pi * dt_col.dt.month / 12.0)
-            tx_row["month_cos"] = np.cos(2 * np.pi * dt_col.dt.month / 12.0)
+            dt_cols = df_tx_list_proc["trans_date_trans_time"]
+            df_tx_list_proc["hour_sin"] = np.sin(2 * np.pi * dt_cols.dt.hour / 24.0)
+            df_tx_list_proc["hour_cos"] = np.cos(2 * np.pi * dt_cols.dt.hour / 24.0)
+            df_tx_list_proc["weekday_sin"] = np.sin(2 * np.pi * dt_cols.dt.dayofweek / 7.0)
+            df_tx_list_proc["weekday_cos"] = np.cos(2 * np.pi * dt_cols.dt.dayofweek / 7.0)
+            df_tx_list_proc["month_sin"] = np.sin(2 * np.pi * dt_cols.dt.month / 12.0)
+            df_tx_list_proc["month_cos"] = np.cos(2 * np.pi * dt_cols.dt.month / 12.0)
 
             features_list = [
                 "category",
@@ -365,19 +404,23 @@ if target_merchant:
                 "month_sin",
                 "month_cos",
             ]
-            X_single = tx_row[features_list]
-            y_single = tx_row["is_fraud"]
+            X_all = df_tx_list_proc[features_list]
+            y_all = df_tx_list_proc["is_fraud"]
 
-            X_enc_single = preprocessor.transform(X_single)
+            X_enc_all = preprocessor.transform(X_all)
             if hasattr(preprocessor, "get_feature_names_out"):
                 cols = [c.split("__")[-1] for c in preprocessor.get_feature_names_out()]
             else:
-                cols = X_single.columns.tolist()
+                cols = X_all.columns.tolist()
 
-            if not isinstance(X_enc_single, pd.DataFrame):
-                X_enc_single = pd.DataFrame(X_enc_single, columns=cols)
+            if not isinstance(X_enc_all, pd.DataFrame):
+                X_enc_all = pd.DataFrame(X_enc_all, columns=cols, index=df_tx_list_proc.index)
             else:
-                X_enc_single.columns = [c.split("__")[-1] for c in X_enc_single.columns]
+                X_enc_all.columns = [c.split("__")[-1] for c in X_enc_all.columns]
+                X_enc_all.index = df_tx_list_proc.index
+
+            # Extraction de la ligne spécifique pour l'affichage des détails
+            tx_row = df_tx_list_proc.loc[[tx_id]]
 
             features_groups = {
                 "Heure": ["hour_sin", "hour_cos"],
@@ -405,7 +448,7 @@ if target_merchant:
             xpl.get_interaction_values = dummy_get_interaction_values
 
             with st.spinner("Calcul de la contribution locale..."):
-                xpl.compile(x=X_enc_single, y_target=y_single)
+                xpl.compile(x=X_enc_all, y_target=y_all)
                 fig_local = xpl.plot.local_plot(index=tx_id)
 
             c_d1, c_d2 = st.columns([1, 2])
@@ -557,7 +600,9 @@ else:
                 "avg_distance_impact",
                 "avg_age_impact",
                 "avg_city_pop_impact",
-                "avg_time_impact",
+                "avg_hour_impact",
+                "avg_weekday_impact",
+                "avg_month_impact",
             ]:
                 df_shap[col] = df_shap[col].astype(float)
 
@@ -565,7 +610,9 @@ else:
             avg_dist = df_shap["avg_distance_impact"].mean()
             avg_age = df_shap["avg_age_impact"].mean()
             avg_pop = df_shap["avg_city_pop_impact"].mean()
-            avg_time = df_shap["avg_time_impact"].mean()
+            avg_hour = df_shap["avg_hour_impact"].mean()
+            avg_weekday = df_shap["avg_weekday_impact"].mean()
+            avg_month = df_shap["avg_month_impact"].mean()
 
             shap_summary_df = pd.DataFrame(
                 {
@@ -574,14 +621,18 @@ else:
                         "Distance Achat",
                         "Âge Client",
                         "Population Ville",
-                        "Facteur Temps",
+                        "Heure de la journée",
+                        "Jour de la semaine",
+                        "Mois de l'année",
                     ],
                     "Impact SHAP Moyen (Absolu)": [
                         avg_amt,
                         avg_dist,
                         avg_age,
                         avg_pop,
-                        avg_time,
+                        avg_hour,
+                        avg_weekday,
+                        avg_month,
                     ],
                 }
             ).sort_values(by="Impact SHAP Moyen (Absolu)", ascending=True)

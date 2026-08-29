@@ -7,8 +7,10 @@ with transactions as (
         cast(shap_values->>'distance_achat' as numeric) as distance_shap,
         cast(shap_values->>'age' as numeric) as age_shap,
         cast(shap_values->>'city_pop' as numeric) as city_pop_shap,
-        -- Somme cumulée du facteur temps
-        (cast(shap_values->>'hour_sin' as numeric) + cast(shap_values->>'hour_cos' as numeric)) as time_shap
+        -- Facteurs temporels distincts
+        (coalesce(cast(shap_values->>'hour_sin' as numeric), 0) + coalesce(cast(shap_values->>'hour_cos' as numeric), 0)) as hour_shap,
+        (coalesce(cast(shap_values->>'weekday_sin' as numeric), 0) + coalesce(cast(shap_values->>'weekday_cos' as numeric), 0)) as weekday_shap,
+        (coalesce(cast(shap_values->>'month_sin' as numeric), 0) + coalesce(cast(shap_values->>'month_cos' as numeric), 0)) as month_shap
     from {{ ref('stg_transactions') }}
     where is_predicted_fraud = 1 -- On se concentre uniquement sur les fraudes
 ),
@@ -21,7 +23,9 @@ merchant_shap as (
         round(avg(abs(distance_shap)), 3) as avg_distance_impact,
         round(avg(abs(age_shap)), 3) as avg_age_impact,
         round(avg(abs(city_pop_shap)), 3) as avg_city_pop_impact,
-        round(avg(abs(time_shap)), 3) as avg_time_impact
+        round(avg(abs(hour_shap)), 3) as avg_hour_impact,
+        round(avg(abs(weekday_shap)), 3) as avg_weekday_impact,
+        round(avg(abs(month_shap)), 3) as avg_month_impact
     from transactions
     group by 1
 )
