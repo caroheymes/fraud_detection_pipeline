@@ -5,4 +5,4 @@ General Information:
   date: "auto"
 
 Description:
-  description: "Rapport d'expliquabilite pour le modele de classification de fraude XGBoost."
+  description: "Rapport d'explicabilité pour le modèle de classification de fraude XGBoost."

@@ -149,19 +149,21 @@ if os.path.exists(drift_report_path):
         drift_loaded = True
     except Exception:
         pass
-        
+
 if drift_loaded:
     drift_detected = drift_data.get("drift_detected", False)
     mean_ratio = drift_data.get("mean_drift_ratio", 0.0)
     curr_date = drift_data.get("current_date", "N/A")
-    
+
     if drift_detected:
-        st.error(f"🚨 **Statut de Drift** : **Dérive détectée !** ({mean_ratio * 100:.1f}% des variables dérivent)")
+        st.error(
+            f"🚨 **Statut de Drift** : **Dérive détectée !** ({mean_ratio * 100:.1f}% des variables dérivent)"
+        )
     else:
         st.success("🟢 **Statut de Drift** : **Stable** (Aucun drift global détecté)")
-        
+
     st.markdown(f"**Dernière vérification :** `{curr_date}`")
-    
+
     # Rendu direct du rapport interactif HTML d'Evidently AI
     html_report_path = "src/training/evidently_drift_report.html"
     if os.path.exists(html_report_path):
@@ -169,14 +171,19 @@ if drift_loaded:
             with open(html_report_path, "r", encoding="utf-8") as f:
                 html_content = f.read()
             import streamlit.components.v1 as components
+
             components.html(html_content, height=1000, scrolling=True)
         except Exception as html_err:
             st.error(f"Erreur d'affichage du rapport HTML : {html_err}")
     else:
         st.warning("Le rapport HTML interactif n'a pas été trouvé.")
 else:
-    st.info("📈 **Evidently AI (Statut de Drift)** : `Stable` (Aucun drift global détecté)")
-    st.markdown("**Dernière vérification :** Aujourd'hui à 02:00 (prochaine demain à 02:00)")
+    st.info(
+        "📈 **Evidently AI (Statut de Drift)** : `Stable` (Aucun drift global détecté)"
+    )
+    st.markdown(
+        "**Dernière vérification :** Aujourd'hui à 02:00 (prochaine demain à 02:00)"
+    )
 
 # Barre latérale de configuration générale
 st.sidebar.header("⚙️ Contrôles globaux")

@@ -116,6 +116,7 @@ class TransactionBatch(BaseModel):
         }
     }
 
+
 class WebhookData(BaseModel):
     transaction_id: str
     cc_num_sha256: str
@@ -126,14 +127,17 @@ class WebhookData(BaseModel):
     prediction_proba: float
     explications_shap: dict[str, float]
 
+
 class WebhookPayload(BaseModel):
     event: str
     timestamp: str
     data: WebhookData
 
+
 class WebhookResponse(BaseModel):
     status: str
     message: str
+
 
 class WebhookRequest(BaseModel):
     transaction_id: str
@@ -248,7 +252,9 @@ def save_predictions_to_db(
         t_param["fast_pass_suspicion"] = int(fast_pass_suspicions[i])
         t_param["fast_pass_score"] = int(fast_pass_scores[i])
         t_param["prediction_latency_ms"] = float(prediction_latency_ms)
-        t_param["shap_values"] = json.dumps(shap_values_list[i]) if shap_values_list[i] is not None else None
+        t_param["shap_values"] = (
+            json.dumps(shap_values_list[i]) if shap_values_list[i] is not None else None
+        )
         params_list.append(t_param)
 
     try:
@@ -595,7 +601,8 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     # ==========================================================
     shap_values_list = [None] * len(df)
     suspicious_indices = [
-        idx for idx in range(len(df))
+        idx
+        for idx in range(len(df))
         if predictions[idx] == 1 or fast_pass_suspicions[idx] == 1
     ]
     if suspicious_indices:
@@ -652,11 +659,13 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     "/mock-merchant-webhook",
     response_model=WebhookPayload,
     summary="Mock de réception de webhook marchand sécurisé",
-    description="Simule l'écouteur du marchand recevant les alertes de transactions suspectes. Valide la présence d'un en-tête d'authentification simulated X-Merchant-Token et renvoie le payload complet du webhook après récupération des détails de transaction dans PostgreSQL."
+    description="Simule l'écouteur du marchand recevant les alertes de transactions suspectes. Valide la présence d'un en-tête d'authentification simulated X-Merchant-Token et renvoie le payload complet du webhook après récupération des détails de transaction dans PostgreSQL.",
 )
 def mock_merchant_webhook(
     payload: WebhookRequest,
-    x_merchant_token: str = Header(..., description="Token d'authentification simulé du marchand (ex: secret_key)")
+    x_merchant_token: str = Header(
+        ..., description="Token d'authentification simulé du marchand (ex: secret_key)"
+    ),
 ):
     global redis_client
     print(
@@ -665,6 +674,7 @@ def mock_merchant_webhook(
 
     # Valeurs par défaut (fallback)
     import hashlib
+
     cc_num_sha256 = hashlib.sha256(b"423578912345").hexdigest()
     amount = 949.99
     category = "misc_net"
@@ -677,7 +687,7 @@ def mock_merchant_webhook(
         "age": 0.05,
         "city_pop": 0.01,
         "hour_sin": 0.04,
-        "hour_cos": -0.02
+        "hour_cos": -0.02,
     }
     timestamp = datetime.utcnow().isoformat() + "Z"
 
@@ -689,7 +699,9 @@ def mock_merchant_webhook(
                 FROM silver.rawdata
                 WHERE trans_num = :trans_num
             """)
-            result = conn.execute(query, {"trans_num": payload.transaction_id}).fetchone()
+            result = conn.execute(
+                query, {"trans_num": payload.transaction_id}
+            ).fetchone()
             if result:
                 cc_num_sha256 = hashlib.sha256(str(result[0]).encode()).hexdigest()
                 amount = float(result[1])
@@ -697,14 +709,14 @@ def mock_merchant_webhook(
                 merchant = str(result[3])
                 prediction = int(result[4])
                 prediction_proba = float(result[5])
-                
+
                 shap_str = result[6]
                 if shap_str:
                     try:
                         explications_shap = json.loads(shap_str)
                     except Exception:
                         pass
-                
+
                 timestamp = pd.to_datetime(result[7]).isoformat() + "Z"
     except Exception as db_err:
         print(f"[Mock Merchant Server] Échec de la requête Postgres : {db_err}")
@@ -721,20 +733,27 @@ def mock_merchant_webhook(
             merchant=merchant,
             prediction=prediction,
             prediction_proba=prediction_proba,
-            explications_shap=explications_shap
-        )
+            explications_shap=explications_shap,
+        ),
     )
 
     # Écriture dans Redis pour l'affichage en direct sur le Dashboard
     if redis_client is not None:
         try:
             import time
+
             now = time.time()
             if redis_client.type("merchant_webhook_alerts") == "list":
                 redis_client.delete("merchant_webhook_alerts")
-            redis_client.zadd("merchant_webhook_alerts", {json.dumps(webhook_payload.dict()): now})
-            redis_client.zremrangebyscore("merchant_webhook_alerts", "-inf", now - 86400)
+            redis_client.zadd(
+                "merchant_webhook_alerts", {json.dumps(webhook_payload.dict()): now}
+            )
+            redis_client.zremrangebyscore(
+                "merchant_webhook_alerts", "-inf", now - 86400
+            )
         except Exception as redis_err:
-            print(f"[Mock Merchant Server] Échec de l'écriture dans Redis : {redis_err}")
+            print(
+                f"[Mock Merchant Server] Échec de l'écriture dans Redis : {redis_err}"
+            )
 
     return webhook_payload

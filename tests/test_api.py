@@ -159,7 +159,7 @@ def test_api_predict_batch_schema():
 def test_ingest_parallel_requests():
     """Simule des requêtes d'ingestion parallèles pour valider la robustesse de l'API sous charge"""
     import concurrent.futures
-    
+
     payload = {
         "transactions": [
             {
@@ -206,4 +206,3 @@ def test_ingest_parallel_requests():
         data = response.json()
         assert data["status"] == "success"
         assert len(data["predictions"]) == 1
-

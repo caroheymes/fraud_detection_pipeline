@@ -1,4 +1,4 @@
-# src/dashboard/pages/2_Expliquabilite_and_Champion.py
+# src/dashboard/pages/2_Explicabilite_et_champion.py
 
 import os
 
@@ -10,12 +10,12 @@ from mlflow.tracking import MlflowClient
 from shapash import SmartExplainer
 
 st.set_page_config(
-    page_title="Expliquabilité Shapash & Performances du Champion",
+    page_title="Explicabilité Shapash & performances du champion",
     page_icon="🔍",
     layout="wide",
 )
 
-st.title("🔍 Expliquabilité Shapash & performances du champion")
+st.title("🔍 Explicabilité Shapash & performances du champion")
 st.markdown("---")
 
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
@@ -122,9 +122,19 @@ def get_hybrid_explain_sample():
     return df_sample_resorted
 
 
-# Cache pour le chargement de l'explicateur Shapash
+def get_current_champion_version_key() -> str:
+    """Récupère l'identifiant unique de la version champion pour invalider automatiquement le cache Streamlit."""
+    try:
+        client = MlflowClient()
+        v = client.get_model_version_by_alias("fraud_detector", "champion")
+        return f"v{v.version}_{v.run_id}"
+    except Exception:
+        return "fallback_run"
+
+
+# Cache dynamique pour le chargement de l'explicateur Shapash
 @st.cache_resource
-def load_shapash_explainer():
+def load_shapash_explainer(version_key: str):
     champion_run_id = None
     champion_metrics = {}
     champion_params = {}
@@ -203,13 +213,42 @@ def load_shapash_explainer():
 
         xpl_obj.get_interaction_values = dummy_get_interaction_values
         xpl_obj.compile(x=X_enc, y_target=y_samp)
+
+        predictor_class = getattr(predictor, "__class__", type(predictor)).__name__
+        preprocessor_class = (
+            getattr(preprocessor, "__class__", type(preprocessor)).__name__
+            if preprocessor is not None
+            else "Standard"
+        )
+        run_name = getattr(champion_run.info, "run_name", "") or ""
+        run_source = champion_run.data.tags.get("mlflow.source.name", "") or ""
+        is_gnn = (
+            ("embedding_size" in champion_params)
+            or ("GRL" in run_name)
+            or ("HinSAGE" in run_name)
+            or ("gnn" in run_source.lower())
+            or ("gnn" in predictor_class.lower())
+        )
+
+        model_meta = {
+            "version": f"Version {version_details.version}",
+            "raw_version": str(version_details.version),
+            "run_id": champion_run_id,
+            "run_name": run_name,
+            "source": run_source,
+            "is_gnn": is_gnn,
+            "predictor_class": predictor_class,
+            "preprocessor_class": preprocessor_class,
+            "tags": champion_run.data.tags,
+        }
+
         return (
             xpl_obj,
             df_sample_resorted,
             X_enc,
             champion_metrics,
             champion_params,
-            f"Version {version_details.version}",
+            model_meta,
         )
 
     except Exception as err:
@@ -295,13 +334,31 @@ def load_shapash_explainer():
 
                 xpl_obj.get_interaction_values = dummy_get_interaction_values
                 xpl_obj.compile(x=X_enc, y_target=y_samp)
+
+                pred_cls = getattr(predictor, "__class__", type(predictor)).__name__
+                prep_cls = (
+                    getattr(preprocessor, "__class__", type(preprocessor)).__name__
+                    if preprocessor is not None
+                    else "Standard"
+                )
+                model_meta = {
+                    "version": "Dernier Run",
+                    "raw_version": "N/A",
+                    "run_id": champion_run_id,
+                    "run_name": latest_run.info.run_name if latest_run else "Inconnu",
+                    "source": "Fallback",
+                    "is_gnn": False,
+                    "predictor_class": pred_cls,
+                    "preprocessor_class": prep_cls,
+                    "tags": latest_run.data.tags if latest_run else {},
+                }
                 return (
                     xpl_obj,
                     df_sample_resorted,
                     X_enc,
                     champion_metrics,
                     champion_params,
-                    "Dernier Run",
+                    model_meta,
                 )
         except Exception as final_err:
             st.error(
@@ -311,33 +368,151 @@ def load_shapash_explainer():
 
 
 with st.spinner("Chargement du modèle champion et calcul des contributions SHAP..."):
-    xpl, df_sample, X_encoded, metrics, params, model_ver = load_shapash_explainer()
+    current_champion_key = get_current_champion_version_key()
+    xpl, df_sample, X_encoded, metrics, params, model_meta = load_shapash_explainer(
+        current_champion_key
+    )
 
 if xpl is not None:
+    # Extraction dynamique des métadonnées
+    predictor_cls = (
+        model_meta.get("predictor_class", "XGBClassifier")
+        if isinstance(model_meta, dict)
+        else "XGBClassifier"
+    )
+    preprocessor_cls = (
+        model_meta.get("preprocessor_class", "TableVectorizer")
+        if isinstance(model_meta, dict)
+        else "TableVectorizer"
+    )
+    is_gnn = model_meta.get("is_gnn", False) if isinstance(model_meta, dict) else False
+    ver_label = (
+        model_meta.get("version", "Champion")
+        if isinstance(model_meta, dict)
+        else str(model_meta)
+    )
+    run_name = (
+        model_meta.get("run_name", "Run MLflow")
+        if isinstance(model_meta, dict)
+        else "Inconnu"
+    )
+    run_source = (
+        model_meta.get("source", "Pipeline ML")
+        if isinstance(model_meta, dict)
+        else "Script"
+    )
+
+    # Détection de la famille d'algorithme
+    if is_gnn:
+        family_title = (
+            f"Inductive Graph Representation Learning (HinSAGE + {predictor_cls})"
+        )
+        family_icon = "🧠"
+        family_desc = "Modélisation sur graphe tripartite hétérogène (*Clients ↔ Transactions ↔ Marchands*) avec agrégation de voisinage 2-hop et classification aval avec Focal Loss."
+    elif any(
+        k in predictor_cls for k in ["XGB", "Gradient", "LGBM", "CatBoost", "Hist"]
+    ):
+        family_title = f"Gradient Boosted Decision Trees ({predictor_cls})"
+        family_icon = "🌲"
+        family_desc = "Ensemble d'arbres de décision boostés séquentiellement, optimisant la fonction de perte avec régularisation et gestion des classes déséquilibrées."
+    elif any(k in predictor_cls for k in ["Forest", "Tree", "ExtraTrees"]):
+        family_title = f"Ensemble d'Arbres Aléatoires ({predictor_cls})"
+        family_icon = "🌳"
+        family_desc = "Forêt d'arbres de décision indépendants avec agrégation par vote majoritaire et pondération de classes."
+    elif any(k in predictor_cls for k in ["Logistic", "Linear", "SGD", "Ridge"]):
+        family_title = f"Modèle Linéaire Supervisé ({predictor_cls})"
+        family_icon = "📐"
+        family_desc = "Modèle linéaire probabiliste avec pénalité de régularisation et calibration de seuil de décision."
+    else:
+        family_title = f"Classifieur Supervisé ({predictor_cls})"
+        family_icon = "⚙️"
+        family_desc = f"Modèle supervisé Scikit-Learn avec pipeline de prétraitement {preprocessor_cls}."
+
     # Les variables cycliques (sin/cos) sont regroupées nativement par Shapash grâce à l'argument features_groups
     available_features = [
         col for col in X_encoded.columns if not any(x in col for x in ["sin", "cos"])
     ]
     available_features += ["Heure", "Jour de la semaine", "Mois de l'année"]
-    # SECTION A : PERFORMANCES DU MODÈLE CHAMPION
-    st.markdown(f"### 📊 Performances du modèle champion ({model_ver})")
 
-    c_m1, c_m2, c_m3, c_m4 = st.columns(4)
+    # SECTION A : PERFORMANCES & CARACTÉRISTIQUES DU MODÈLE CHAMPION
+    st.markdown(
+        f"### 📊 Performances & Caractéristiques du modèle champion ({ver_label})"
+    )
+
+    # Bannière adaptative
+    if is_gnn:
+        st.success(f"{family_icon} **Architecture : {family_title}**  \n{family_desc}")
+    else:
+        st.info(f"{family_icon} **Architecture : {family_title}**  \n{family_desc}")
+
+    # Cartouches des 5 métriques clés
+    c_m1, c_m2, c_m3, c_m4, c_m5 = st.columns(5)
     with c_m1:
-        st.metric("F1-Score Fraude (Classe 1)", f"{metrics.get('f1_class_1', 0.0):.4f}")
+        st.metric("F1-Score Fraude (C1)", f"{metrics.get('f1_class_1', 0.0):.4f}")
     with c_m2:
-        st.metric("Rappel Fraude (Recall C1)", f"{metrics.get('rec_class_1', 0.0):.4f}")
+        f2_val = metrics.get("f2_class_1", 0.0)
+        if f2_val == 0.0:
+            p_val = metrics.get("prec_class_1", 0.0)
+            r_val = metrics.get("rec_class_1", 0.0)
+            f2_val = (
+                (5 * p_val * r_val) / (4 * p_val + r_val)
+                if (4 * p_val + r_val) > 0
+                else 0.0
+            )
+        st.metric("F2-Score (Cible Rappel)", f"{f2_val:.4f}")
     with c_m3:
+        st.metric("Rappel Fraude (Recall C1)", f"{metrics.get('rec_class_1', 0.0):.4f}")
+    with c_m4:
         st.metric(
             "Précision Fraude (Prec C1)", f"{metrics.get('prec_class_1', 0.0):.4f}"
         )
-    with c_m4:
+    with c_m5:
         st.metric("F1 Macro (Global)", f"{metrics.get('F1_global', 0.0):.4f}")
 
-    st.markdown("**Paramètres clés du modèle :**")
-    st.code(
-        f"max_depth: {params.get('max_depth')}  |  learning_rate: {params.get('learning_rate')}  |  n_estimators: {params.get('n_estimators')}  |  scale_pos_weight: {params.get('scale_pos_weight')}"
-    )
+    # Spécifications détaillées et adaptatives du modèle
+    with st.expander(
+        "⚙️ Fiche technique détaillée & Hyperparamètres du champion", expanded=True
+    ):
+        c_spec1, c_spec2 = st.columns(2)
+        with c_spec1:
+            st.markdown("#### 🏗️ Pipeline & Encodage")
+            st.write(f"• **Algorithme Principal :** `{predictor_cls}`")
+            st.write(f"• **Préprocesseur :** `{preprocessor_cls}`")
+            if is_gnn:
+                st.write(
+                    "• **Topologie du graphe :** Tripartite (*Clients ↔ Transactions ↔ Marchands*)"
+                )
+                emb_dim = params.get("embedding_size", 16)
+                st.write(f"• **Dimension des embeddings GNN :** `{emb_dim}` dimensions")
+                st.write(
+                    "• **Agrégation de voisinage :** HinSAGE 2-Hop inductive pooling"
+                )
+                st.write("• **Fonction de coût GNN :** Focal Loss")
+            else:
+                st.write("• **Mode d'apprentissage :** Supervisé Tabulaire")
+                st.write(
+                    "• **Features d'entrée :** 12 variables (temporelles, spatiales, montants)"
+                )
+
+            src_file = os.path.basename(run_source) if run_source else "demo_gnn.py"
+            st.write(f"• **Script source :** `{src_file}`")
+            st.write(f"• **Nom du Run :** `{run_name}`")
+
+        with c_spec2:
+            st.markdown("#### 🎛️ Hyperparamètres Enregistrés")
+            if params:
+                for param_k, param_v in sorted(params.items()):
+                    try:
+                        v_flt = float(param_v)
+                        if "." in str(param_v) and len(str(param_v).split(".")[1]) > 4:
+                            display_str = f"{v_flt:.4f}"
+                        else:
+                            display_str = str(param_v)
+                    except Exception:
+                        display_str = str(param_v)
+                    st.write(f"• **`{param_k}` :** {display_str}")
+            else:
+                st.write("• *Aucun paramètre spécifique consigné.*")
 
     st.markdown("---")
 

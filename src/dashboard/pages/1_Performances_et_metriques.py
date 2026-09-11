@@ -315,3 +315,225 @@ if cm_df is not None and not cm_df.empty:
         )
         fig_live.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig_live, use_container_width=True)
+
+# ==========================================================
+# 4. SUIVI TEMPOREL DES MÉTRIQUES EN FLUX DE PRODUCTION (PAS QUOTIDIEN)
+# ==========================================================
+st.markdown("---")
+st.subheader(
+    "📈 Évolution temporelle des métriques en flux de production (Pas quotidien)"
+)
+st.write(
+    "Suivi continu des métriques de détection de fraude calculées au jour le jour sur les transactions réelles ingérées."
+)
+
+daily_query = """
+    SELECT 
+        trans_date_trans_time::date as jour,
+        COUNT(*) as total_tx,
+        COUNT(CASE WHEN is_fraud::int = 1 THEN 1 END) as n_fraude_reelle,
+        COUNT(CASE WHEN prediction::int = 1 THEN 1 END) as n_fraude_predite,
+        COUNT(CASE WHEN is_fraud::int = 1 AND prediction::int = 1 THEN 1 END) as tp,
+        COUNT(CASE WHEN is_fraud::int = 0 AND prediction::int = 1 THEN 1 END) as fp,
+        COUNT(CASE WHEN is_fraud::int = 1 AND prediction::int = 0 THEN 1 END) as fn,
+        COUNT(CASE WHEN is_fraud::int = 0 AND prediction::int = 0 THEN 1 END) as tn
+    FROM silver.rawdata
+    WHERE prediction IS NOT NULL AND is_fraud IS NOT NULL
+    GROUP BY 1
+    ORDER BY 1 ASC;
+"""
+
+df_daily_raw, daily_err = query_db(daily_query)
+
+if df_daily_raw is not None and not df_daily_raw.empty:
+    import numpy as np
+    import plotly.graph_objects as go
+
+    df_daily = df_daily_raw.copy()
+    df_daily["jour"] = pd.to_datetime(df_daily["jour"])
+
+    # Calcul des métriques par jour avec sécurisation division par zéro
+    tp_s = df_daily["tp"].astype(float)
+    fp_s = df_daily["fp"].astype(float)
+    fn_s = df_daily["fn"].astype(float)
+    tn_s = df_daily["tn"].astype(float)
+    total_s = df_daily["total_tx"].astype(float)
+
+    df_daily["precision"] = np.where((tp_s + fp_s) > 0, tp_s / (tp_s + fp_s), np.nan)
+    df_daily["recall"] = np.where((tp_s + fn_s) > 0, tp_s / (tp_s + fn_s), np.nan)
+    prec_s = df_daily["precision"].fillna(0)
+    rec_s = df_daily["recall"].fillna(0)
+    df_daily["f1_score"] = np.where(
+        (prec_s + rec_s) > 0, 2 * (prec_s * rec_s) / (prec_s + rec_s), np.nan
+    )
+    df_daily["f2_score"] = np.where(
+        (4 * prec_s + rec_s) > 0,
+        5 * (prec_s * rec_s) / (4 * prec_s + rec_s),
+        np.nan,
+    )
+    df_daily["accuracy"] = (tp_s + tn_s) / total_s
+
+    # Contrôles de filtres
+    c_flt1, c_flt2, c_flt3 = st.columns([1.5, 2, 1.5])
+    with c_flt1:
+        time_range = st.selectbox(
+            "📅 Fenêtre temporelle",
+            ["7 derniers jours", "30 derniers jours", "Tout l'historique"],
+            index=1,
+        )
+    with c_flt2:
+        selected_metrics = st.multiselect(
+            "📊 Métriques à afficher",
+            [
+                "F1-Score Fraude",
+                "F2-Score Fraude",
+                "Rappel (Recall)",
+                "Précision",
+                "Accuracy",
+            ],
+            default=[
+                "F1-Score Fraude",
+                "Rappel (Recall)",
+                "Précision",
+            ],
+        )
+    with c_flt3:
+        apply_rolling = st.checkbox("🔄 Lissage (Moyenne mobile 7j)", value=True)
+
+    # Filtrage temporel
+    max_date = df_daily["jour"].max()
+    if time_range == "7 derniers jours":
+        df_filtered = df_daily[
+            df_daily["jour"] >= (max_date - timedelta(days=7))
+        ].copy()
+    elif time_range == "30 derniers jours":
+        df_filtered = df_daily[
+            df_daily["jour"] >= (max_date - timedelta(days=30))
+        ].copy()
+    else:
+        df_filtered = df_daily.copy()
+
+    # Application du lissage si demandé
+    metric_cols = {
+        "F1-Score Fraude": "f1_score",
+        "F2-Score Fraude": "f2_score",
+        "Rappel (Recall)": "recall",
+        "Précision": "precision",
+        "Accuracy": "accuracy",
+    }
+
+    plot_df = df_filtered.copy()
+    if apply_rolling:
+        for col_name in metric_cols.values():
+            plot_df[col_name] = (
+                plot_df[col_name].rolling(window=7, min_periods=1).mean()
+            )
+
+    # KPI Synthétiques sur la période filtrée
+    avg_f1 = df_filtered["f1_score"].dropna().mean()
+    avg_f2 = df_filtered["f2_score"].dropna().mean()
+    avg_rec = df_filtered["recall"].dropna().mean()
+    avg_prec = df_filtered["precision"].dropna().mean()
+    tot_tp = int(df_filtered["tp"].sum())
+    tot_fn = int(df_filtered["fn"].sum())
+
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    with kpi1:
+        st.metric("F1-Score Moyen", f"{avg_f1:.4f}" if not np.isnan(avg_f1) else "N/A")
+    with kpi2:
+        st.metric("F2-Score Moyen", f"{avg_f2:.4f}" if not np.isnan(avg_f2) else "N/A")
+    with kpi3:
+        st.metric("Rappel Moyen", f"{avg_rec:.2%}" if not np.isnan(avg_rec) else "N/A")
+    with kpi4:
+        st.metric(
+            "Précision Moyenne", f"{avg_prec:.2%}" if not np.isnan(avg_prec) else "N/A"
+        )
+    with kpi5:
+        st.metric(
+            "Fraudes Interceptées",
+            f"{tot_tp:,}",
+            f"{tot_fn:,} manquées",
+            delta_color="inverse",
+        )
+
+    # Graphique interactif Plotly
+    fig_time = go.Figure()
+
+    color_map = {
+        "F1-Score Fraude": "#2563EB",  # Bleu soutenu
+        "F2-Score Fraude": "#7C3AED",  # Violet
+        "Rappel (Recall)": "#F59E0B",  # Ambre / Orange
+        "Précision": "#10B981",  # Émeraude / Vert
+        "Accuracy": "#6B7280",  # Gris
+    }
+
+    for label in selected_metrics:
+        col = metric_cols[label]
+        fig_time.add_trace(
+            go.Scatter(
+                x=plot_df["jour"],
+                y=plot_df[col],
+                mode="lines+markers",
+                name=label,
+                line=dict(color=color_map.get(label, "#3B82F6"), width=2.5),
+                marker=dict(size=5),
+                hovertemplate="<b>Date :</b> %{x|%d/%m/%Y}<br><b>"
+                + label
+                + " :</b> %{y:.4f}<extra></extra>",
+            )
+        )
+
+    fig_time.update_layout(
+        title="📈 Évolution Quotidienne des Métriques (Flux de Production)",
+        xaxis_title="Date de transaction",
+        yaxis_title="Score (0 à 1)",
+        yaxis=dict(range=[0.0, 1.05], gridcolor="#E5E7EB"),
+        xaxis=dict(gridcolor="#E5E7EB"),
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        height=420,
+        margin=dict(l=20, r=20, t=60, b=20),
+    )
+    st.plotly_chart(fig_time, use_container_width=True)
+
+    # Graphique de répartition quotidienne des volumes de fraudes
+    with st.expander("📊 Détail quotidien des volumes de détection (TP, FP, FN)"):
+        fig_bars = go.Figure()
+        fig_bars.add_trace(
+            go.Bar(
+                x=df_filtered["jour"],
+                y=df_filtered["tp"],
+                name="Vrais Positifs (TP - Fraudes bloquées)",
+                marker_color="#10B981",
+            )
+        )
+        fig_bars.add_trace(
+            go.Bar(
+                x=df_filtered["jour"],
+                y=df_filtered["fn"],
+                name="Faux Négatifs (FN - Fraudes manquées)",
+                marker_color="#EF4444",
+            )
+        )
+        fig_bars.add_trace(
+            go.Bar(
+                x=df_filtered["jour"],
+                y=df_filtered["fp"],
+                name="Faux Positifs (FP - Fausses alertes)",
+                marker_color="#F59E0B",
+            )
+        )
+        fig_bars.update_layout(
+            barmode="group",
+            title="Volumes Quotidiens : Détections Réussies vs Erreurs",
+            xaxis_title="Date",
+            yaxis_title="Nombre de transactions",
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+            ),
+            height=320,
+            margin=dict(l=20, r=20, t=50, b=20),
+        )
+        st.plotly_chart(fig_bars, use_container_width=True)
+else:
+    st.info("Aucune donnée de prédiction historique trouvée dans la base PostgreSQL.")

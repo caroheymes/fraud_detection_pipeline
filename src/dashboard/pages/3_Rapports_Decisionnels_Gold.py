@@ -284,34 +284,55 @@ else:
             df_monthly_metrics, err_monthly_metrics = query_db(
                 "SELECT * FROM gold.mart_merchant_monthly_metrics ORDER BY transaction_month ASC"
             )
-            if not err_monthly_metrics and df_monthly_metrics is not None and not df_monthly_metrics.empty:
+            if (
+                not err_monthly_metrics
+                and df_monthly_metrics is not None
+                and not df_monthly_metrics.empty
+            ):
                 if active_merchants:
-                    df_monthly_metrics = df_monthly_metrics[df_monthly_metrics["merchant_name"].isin(active_merchants)]
-                
+                    df_monthly_metrics = df_monthly_metrics[
+                        df_monthly_metrics["merchant_name"].isin(active_merchants)
+                    ]
+
                 if df_monthly_metrics.empty:
-                    st.warning("Aucune donnée mensuelle disponible pour les marchands sélectionnés.")
-                else:
-                    df_monthly_grouped = df_monthly_metrics.groupby("transaction_month").agg(
-                        {
-                            "total_transactions": "sum",
-                            "fraud_transactions_count": "sum",
-                            "total_volume": "sum",
-                            "blocked_fraud_volume": "sum",
-                        }
-                    ).reset_index()
-                    df_monthly_grouped["fraud_rate_percentage"] = round(
-                        (df_monthly_grouped["fraud_transactions_count"] / df_monthly_grouped["total_transactions"]) * 100,
-                        2
+                    st.warning(
+                        "Aucune donnée mensuelle disponible pour les marchands sélectionnés."
                     )
-                    
-                    df_monthly_grouped["transaction_month"] = df_monthly_grouped["transaction_month"].astype(str)
-                    
+                else:
+                    df_monthly_grouped = (
+                        df_monthly_metrics.groupby("transaction_month")
+                        .agg(
+                            {
+                                "total_transactions": "sum",
+                                "fraud_transactions_count": "sum",
+                                "total_volume": "sum",
+                                "blocked_fraud_volume": "sum",
+                            }
+                        )
+                        .reset_index()
+                    )
+                    df_monthly_grouped["fraud_rate_percentage"] = round(
+                        (
+                            df_monthly_grouped["fraud_transactions_count"]
+                            / df_monthly_grouped["total_transactions"]
+                        )
+                        * 100,
+                        2,
+                    )
+
+                    df_monthly_grouped["transaction_month"] = df_monthly_grouped[
+                        "transaction_month"
+                    ].astype(str)
+
                     fig_monthly_rate = px.line(
                         df_monthly_grouped,
                         x="transaction_month",
                         y="fraud_rate_percentage",
                         title="Évolution du Taux de Fraude Mensuel (%) (Périmètre filtré)",
-                        labels={"transaction_month": "Mois", "fraud_rate_percentage": "Taux de Fraude (%)"},
+                        labels={
+                            "transaction_month": "Mois",
+                            "fraud_rate_percentage": "Taux de Fraude (%)",
+                        },
                         markers=True,
                     )
                     fig_monthly_rate.update_traces(line=dict(color="#e74c3c", width=3))
@@ -374,7 +395,8 @@ if target_merchant:
             )
             df_tx_list_proc["dob"] = pd.to_datetime(df_tx_list_proc["dob"])
             df_tx_list_proc["age"] = (
-                df_tx_list_proc["trans_date_trans_time"].dt.year - df_tx_list_proc["dob"].dt.year
+                df_tx_list_proc["trans_date_trans_time"].dt.year
+                - df_tx_list_proc["dob"].dt.year
             )
             df_tx_list_proc["distance_achat"] = haversine_vectorized(
                 df_tx_list_proc["lat"].astype(float),
@@ -385,8 +407,12 @@ if target_merchant:
             dt_cols = df_tx_list_proc["trans_date_trans_time"]
             df_tx_list_proc["hour_sin"] = np.sin(2 * np.pi * dt_cols.dt.hour / 24.0)
             df_tx_list_proc["hour_cos"] = np.cos(2 * np.pi * dt_cols.dt.hour / 24.0)
-            df_tx_list_proc["weekday_sin"] = np.sin(2 * np.pi * dt_cols.dt.dayofweek / 7.0)
-            df_tx_list_proc["weekday_cos"] = np.cos(2 * np.pi * dt_cols.dt.dayofweek / 7.0)
+            df_tx_list_proc["weekday_sin"] = np.sin(
+                2 * np.pi * dt_cols.dt.dayofweek / 7.0
+            )
+            df_tx_list_proc["weekday_cos"] = np.cos(
+                2 * np.pi * dt_cols.dt.dayofweek / 7.0
+            )
             df_tx_list_proc["month_sin"] = np.sin(2 * np.pi * dt_cols.dt.month / 12.0)
             df_tx_list_proc["month_cos"] = np.cos(2 * np.pi * dt_cols.dt.month / 12.0)
 
@@ -414,7 +440,9 @@ if target_merchant:
                 cols = X_all.columns.tolist()
 
             if not isinstance(X_enc_all, pd.DataFrame):
-                X_enc_all = pd.DataFrame(X_enc_all, columns=cols, index=df_tx_list_proc.index)
+                X_enc_all = pd.DataFrame(
+                    X_enc_all, columns=cols, index=df_tx_list_proc.index
+                )
             else:
                 X_enc_all.columns = [c.split("__")[-1] for c in X_enc_all.columns]
                 X_enc_all.index = df_tx_list_proc.index
