@@ -40,9 +40,9 @@ from sklearn.metrics import (
     confusion_matrix,
     f1_score,
     fbeta_score,
+    precision_recall_curve,
     precision_score,
     recall_score,
-    precision_recall_curve,
 )
 from sklearn.preprocessing import StandardScaler
 from skrub import TableVectorizer
@@ -138,8 +138,10 @@ def load_dataset(sample_size: int = -1, max_graph_nodes: int = 10000) -> pd.Data
         "merch_long",
     }.issubset(df.columns):
         df["distance_achat"] = haversine_vectorized(
-            df["lat"].astype(float), df["long"].astype(float),
-            df["merch_lat"].astype(float), df["merch_long"].astype(float)
+            df["lat"].astype(float),
+            df["long"].astype(float),
+            df["merch_lat"].astype(float),
+            df["merch_long"].astype(float),
         )
 
     if "trans_date_trans_time" in df.columns:
@@ -163,7 +165,9 @@ def load_dataset(sample_size: int = -1, max_graph_nodes: int = 10000) -> pd.Data
 
     # Échantillonnage si spécifié (sans casser la distribution naturelle si sample_size == -1)
     if sample_size > 0 and sample_size < len(df):
-        print(f"Échantillonnage chronologique : {sample_size} premières transactions...")
+        print(
+            f"Échantillonnage chronologique : {sample_size} premières transactions..."
+        )
         df = df.iloc[:sample_size].reset_index(drop=True)
 
     print(
@@ -339,9 +343,15 @@ class HinSAGERepresentationLearner:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         x_t_tensor = torch.tensor(X_train, dtype=torch.float32, device=device)
-        h_c_tensor = torch.tensor(np.array(h_c_list), dtype=torch.float32, device=device)
-        h_m_tensor = torch.tensor(np.array(h_m_list), dtype=torch.float32, device=device)
-        y_tensor = torch.tensor(y_train.values.astype(float), dtype=torch.float32, device=device)
+        h_c_tensor = torch.tensor(
+            np.array(h_c_list), dtype=torch.float32, device=device
+        )
+        h_m_tensor = torch.tensor(
+            np.array(h_m_list), dtype=torch.float32, device=device
+        )
+        y_tensor = torch.tensor(
+            y_train.values.astype(float), dtype=torch.float32, device=device
+        )
 
         # 3. Entraînement du réseau HinSAGE avec Focal Loss
         self.net = HinSAGEPyTorchNet(
@@ -377,19 +387,25 @@ class HinSAGERepresentationLearner:
         m_nodes_test = test_df["merchant_node"].astype(str).values
 
         h_c_list = [
-            self.client_stats.get(c, self.global_client_stat)
-            for c in c_nodes_test
+            self.client_stats.get(c, self.global_client_stat) for c in c_nodes_test
         ]
         h_m_list = [
-            self.merchant_stats.get(m, self.global_merchant_stat)
-            for m in m_nodes_test
+            self.merchant_stats.get(m, self.global_merchant_stat) for m in m_nodes_test
         ]
 
-        device = next(self.net.parameters()).device if self.net is not None else torch.device("cpu")
+        device = (
+            next(self.net.parameters()).device
+            if self.net is not None
+            else torch.device("cpu")
+        )
 
         x_t_tensor = torch.tensor(X_test, dtype=torch.float32, device=device)
-        h_c_tensor = torch.tensor(np.array(h_c_list), dtype=torch.float32, device=device)
-        h_m_tensor = torch.tensor(np.array(h_m_list), dtype=torch.float32, device=device)
+        h_c_tensor = torch.tensor(
+            np.array(h_c_list), dtype=torch.float32, device=device
+        )
+        h_m_tensor = torch.tensor(
+            np.array(h_m_list), dtype=torch.float32, device=device
+        )
 
         self.net.eval()
         with torch.no_grad():
@@ -481,11 +497,17 @@ def run_inductive_grl_pipeline(
 
     # Recherche du seuil optimal maximisant le F1-score sur la classe 1
     y_test_np = inductive_data["fraud_label"].values
-    precisions, recalls, thresholds = precision_recall_curve(y_test_np, predictions_proba)
+    precisions, recalls, thresholds = precision_recall_curve(
+        y_test_np, predictions_proba
+    )
     f1_scores = (2 * precisions * recalls) / (precisions + recalls + 1e-10)
     best_idx = np.argmax(f1_scores)
-    optimal_thresh = float(thresholds[best_idx]) if best_idx < len(thresholds) else decision_threshold
-    
+    optimal_thresh = (
+        float(thresholds[best_idx])
+        if best_idx < len(thresholds)
+        else decision_threshold
+    )
+
     # Seuil calibré retenu (minimum decision_threshold pour protéger la précision)
     calibrated_thresh = max(decision_threshold, optimal_thresh)
     predictions = (predictions_proba >= calibrated_thresh).astype(int)
@@ -539,7 +561,10 @@ def main():
         help="Taille d'échantillon (-1 = complet/sécurisé)",
     )
     parser.add_argument(
-        "--sampling-ratio", type=float, default=0.0, help="Ratio de sampling (0.0 = distribution naturelle)"
+        "--sampling-ratio",
+        type=float,
+        default=0.0,
+        help="Ratio de sampling (0.0 = distribution naturelle)",
     )
     parser.add_argument(
         "--metric-target",
@@ -551,12 +576,16 @@ def main():
     args = parser.parse_args()
 
     target_metric_key = "f1_class_1" if args.metric_target == "f1" else "f2_class_1"
-    target_metric_label = "F1-Score Fraude" if args.metric_target == "f1" else "F2-Score Fraude"
+    target_metric_label = (
+        "F1-Score Fraude" if args.metric_target == "f1" else "F2-Score Fraude"
+    )
 
     print("=" * 70)
     print("  🚀 PIPELINE INDUCTIVE GRL (HinSAGE + XGBoost)")
     print(f"  Configuration : n_trials={args.n_trials}, sample_size={args.sample_size}")
-    print(f"  Métrique cible d'optimisation : {target_metric_label} ({target_metric_key})")
+    print(
+        f"  Métrique cible d'optimisation : {target_metric_label} ({target_metric_key})"
+    )
     print("=" * 70)
 
     df = load_dataset(sample_size=args.sample_size)
@@ -604,11 +633,22 @@ def main():
             is_new_best = " 🌟 [NOUVEAU MEILLEUR SCORE]"
 
         # Affichage en direct des performances de l'expérience
-        print(f"\n┌── 🧪 [ESSAI {trial.number + 1}/{args.n_trials}]{is_new_best} " + "─" * max(2, 45 - len(is_new_best)))
-        print(f"│ 🎯 {target_metric_label:15s} : {current_score:.4f} (Seuil Calibré: {m['calibrated_threshold']:.4f})")
-        print(f"│ 📈 Précision C1: {m['prec_class_1']*100:6.2f}% | Rappel C1: {m['rec_class_1']*100:6.2f}% | F1 C1: {m['f1_class_1']:.4f} | F2 C1: {m['f2_class_1']:.4f}")
-        print(f"│ 📊 Matrice Confusion : TP={cm['tp']} (Fraudes Bloquées) | FP={cm['fp']} (Fausses Alertes) | FN={cm['fn']} | TN={cm['tn']}")
-        print(f"│ ⚙️  Params : Emb={embedding_size}, Depth={max_depth}, Trees={n_estimators}, LR={learning_rate:.3f}, Weight={scale_pos_weight:.2f}")
+        print(
+            f"\n┌── 🧪 [ESSAI {trial.number + 1}/{args.n_trials}]{is_new_best} "
+            + "─" * max(2, 45 - len(is_new_best))
+        )
+        print(
+            f"│ 🎯 {target_metric_label:15s} : {current_score:.4f} (Seuil Calibré: {m['calibrated_threshold']:.4f})"
+        )
+        print(
+            f"│ 📈 Précision C1: {m['prec_class_1'] * 100:6.2f}% | Rappel C1: {m['rec_class_1'] * 100:6.2f}% | F1 C1: {m['f1_class_1']:.4f} | F2 C1: {m['f2_class_1']:.4f}"
+        )
+        print(
+            f"│ 📊 Matrice Confusion : TP={cm['tp']} (Fraudes Bloquées) | FP={cm['fp']} (Fausses Alertes) | FN={cm['fn']} | TN={cm['tn']}"
+        )
+        print(
+            f"│ ⚙️  Params : Emb={embedding_size}, Depth={max_depth}, Trees={n_estimators}, LR={learning_rate:.3f}, Weight={scale_pos_weight:.2f}"
+        )
         print("└" + "─" * 70)
 
         try:
@@ -616,15 +656,24 @@ def main():
             mlflow.log_metric("trial_score", current_score, step=trial.number)
             mlflow.log_metric("trial_f1_c1", m["f1_class_1"], step=trial.number)
             mlflow.log_metric("trial_f2_c1", m["f2_class_1"], step=trial.number)
-            mlflow.log_metric("trial_precision_c1", m["prec_class_1"], step=trial.number)
+            mlflow.log_metric(
+                "trial_precision_c1", m["prec_class_1"], step=trial.number
+            )
             mlflow.log_metric("trial_recall_c1", m["rec_class_1"], step=trial.number)
             mlflow.log_metric("best_score_so_far", best_score_so_far, step=trial.number)
 
             # 2. Log du run enfant individuel (Nested Run)
             with mlflow.start_run(
-                run_name=f"Trial_{trial.number + 1:02d}_InductiveGRL_{args.metric_target.upper()}", nested=True
+                run_name=f"Trial_{trial.number + 1:02d}_InductiveGRL_{args.metric_target.upper()}",
+                nested=True,
             ):
-                mlflow.log_params({"embedding_size": embedding_size, "target_metric": args.metric_target, **xgb_params})
+                mlflow.log_params(
+                    {
+                        "embedding_size": embedding_size,
+                        "target_metric": args.metric_target,
+                        **xgb_params,
+                    }
+                )
                 mlflow.log_metrics(res["metrics"])
         except Exception as ml_err:
             print(f"⚠️ [MLflow] Log de l'essai échoué : {ml_err}")
@@ -634,18 +683,18 @@ def main():
     study = optuna.create_study(direction="maximize")
 
     # Run parent dans l'expérience 'fraud_detection'
-    parent_run_name = (
-        f"InductiveGRL_Study_{args.metric_target.upper()}_{datetime.now().strftime('%m%d_%H%M%S')}"
-    )
+    parent_run_name = f"InductiveGRL_Study_{args.metric_target.upper()}_{datetime.now().strftime('%m%d_%H%M%S')}"
     with mlflow.start_run(run_name=parent_run_name):
         # Enregistrer immédiatement les métadonnées de l'étude dans le parent
-        mlflow.log_params({
-            "target_metric": args.metric_target.upper(),
-            "n_trials": args.n_trials,
-            "dataset_rows": len(df),
-            "split_strategy": "Chronological_70_30",
-            "model_type": "InductiveGRL_HinSAGE_XGBoost"
-        })
+        mlflow.log_params(
+            {
+                "target_metric": args.metric_target.upper(),
+                "n_trials": args.n_trials,
+                "dataset_rows": len(df),
+                "split_strategy": "Chronological_70_30",
+                "model_type": "InductiveGRL_HinSAGE_XGBoost",
+            }
+        )
         mlflow.set_tag("study_status", "RUNNING")
 
         study.optimize(objective, n_trials=args.n_trials)
@@ -653,7 +702,9 @@ def main():
         mlflow.set_tag("study_status", "FINISHED")
 
         print("\n" + "=" * 70)
-        print(f"🏆 MEILLEUR TRIAL OBTENU ({target_metric_label} : {study.best_value:.4f})")
+        print(
+            f"🏆 MEILLEUR TRIAL OBTENU ({target_metric_label} : {study.best_value:.4f})"
+        )
         print(f"Hyperparamètres optimaux : {study.best_params}")
         print("=" * 70 + "\n")
 
@@ -676,7 +727,9 @@ def main():
             decision_threshold=0.85,
         )
 
-        print(f"\n📊 RÉSULTATS DU MODÈLE CHAMPION (Optimisé sur {target_metric_label}) :")
+        print(
+            f"\n📊 RÉSULTATS DU MODÈLE CHAMPION (Optimisé sur {target_metric_label}) :"
+        )
         for k, v in final_res["metrics"].items():
             print(f"  • {k:22s} : {v:.4f}")
 
@@ -744,7 +797,7 @@ def main():
                 comp_data = json.load(f)
         except Exception:
             comp_data = {}
-    
+
     comp_data[f"InductiveGRL_Optimized_{args.metric_target.upper()}"] = {
         **final_res["metrics"],
         "confusion_matrix": final_res["confusion_matrix"],

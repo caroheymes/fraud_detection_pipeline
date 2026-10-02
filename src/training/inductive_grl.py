@@ -4,14 +4,12 @@ Inductive Graph Representation Learning (HinSAGE + XGBoost) Pipeline.
 Fournit une classe InductiveGRLPipeline compatible Scikit-Learn pour l'inférence temps réel et batch.
 """
 
-import os
-import json
 from datetime import datetime
+
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.preprocessing import StandardScaler
 from skrub import TableVectorizer
@@ -132,10 +130,17 @@ class HinSAGERepresentationLearner:
             else:
                 df["merchant_node"] = [f"m_{i % 100}" for i in range(len(df))]
 
-        if "distance_achat" not in df.columns and {"lat", "long", "merch_lat", "merch_long"}.issubset(df.columns):
+        if "distance_achat" not in df.columns and {
+            "lat",
+            "long",
+            "merch_lat",
+            "merch_long",
+        }.issubset(df.columns):
             df["distance_achat"] = haversine_vectorized(
-                df["lat"].astype(float), df["long"].astype(float),
-                df["merch_lat"].astype(float), df["merch_long"].astype(float)
+                df["lat"].astype(float),
+                df["long"].astype(float),
+                df["merch_lat"].astype(float),
+                df["merch_long"].astype(float),
             )
 
         if "trans_date_trans_time" in df.columns:
@@ -156,10 +161,22 @@ class HinSAGERepresentationLearner:
 
         return df
 
-    def _extract_clean_features(self, df_prepared: pd.DataFrame, is_train: bool = True) -> np.ndarray:
+    def _extract_clean_features(
+        self, df_prepared: pd.DataFrame, is_train: bool = True
+    ) -> np.ndarray:
         candidate_cols = [
-            "category", "amt", "gender", "distance_achat", "age", "city_pop",
-            "hour_sin", "hour_cos", "weekday_sin", "weekday_cos", "month_sin", "month_cos"
+            "category",
+            "amt",
+            "gender",
+            "distance_achat",
+            "age",
+            "city_pop",
+            "hour_sin",
+            "hour_cos",
+            "weekday_sin",
+            "weekday_cos",
+            "month_sin",
+            "month_cos",
         ]
         present_cols = [c for c in candidate_cols if c in df_prepared.columns]
         raw_feats = df_prepared[present_cols]
@@ -168,7 +185,9 @@ class HinSAGERepresentationLearner:
             enc = self.vectorizer.fit_transform(raw_feats)
             enc_np = np.nan_to_num(
                 enc.values if hasattr(enc, "values") else np.array(enc),
-                nan=0.0, posinf=0.0, neginf=0.0
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
             )
             scaled = self.scaler.fit_transform(enc_np)
             self.tabular_feature_names = list(self.vectorizer.get_feature_names_out())
@@ -176,7 +195,9 @@ class HinSAGERepresentationLearner:
             enc = self.vectorizer.transform(raw_feats)
             enc_np = np.nan_to_num(
                 enc.values if hasattr(enc, "values") else np.array(enc),
-                nan=0.0, posinf=0.0, neginf=0.0
+                nan=0.0,
+                posinf=0.0,
+                neginf=0.0,
             )
             scaled = self.scaler.transform(enc_np)
 
@@ -222,7 +243,9 @@ class HinSAGERepresentationLearner:
         self.net = HinSAGEPyTorchNet(
             in_features=in_dim, emb_dim=self.emb_dim, hidden_dim=self.hidden_dim
         )
-        optimizer = torch.optim.AdamW(self.net.parameters(), lr=self.lr, weight_decay=1e-4)
+        optimizer = torch.optim.AdamW(
+            self.net.parameters(), lr=self.lr, weight_decay=1e-4
+        )
         criterion = FocalLoss(alpha=0.80, gamma=2.0)
 
         self.net.train()

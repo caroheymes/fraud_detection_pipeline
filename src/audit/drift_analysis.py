@@ -3,9 +3,10 @@ import json
 import os
 
 import pandas as pd
+
 try:
-    from evidently.presets import DataDriftPreset
     from evidently import Report
+    from evidently.presets import DataDriftPreset
 except ImportError:
     from evidently.metric_preset import DataDriftPreset
     from evidently.report import Report
@@ -45,16 +46,27 @@ def run_evidently_drift_check():
         # 3. Lancer Evidently Report (DataDriftPreset)
         try:
             from evidently import DataDefinition, Dataset
+
             schema = DataDefinition(
-                numerical_columns=["amt", "hour_sin", "hour_cos", "distance_achat", "is_fraud"],
+                numerical_columns=[
+                    "amt",
+                    "hour_sin",
+                    "hour_cos",
+                    "distance_achat",
+                    "is_fraud",
+                ],
                 categorical_columns=["gender"],
             )
-            eval_ref = Dataset.from_pandas(df_reference_filtered, data_definition=schema)
+            eval_ref = Dataset.from_pandas(
+                df_reference_filtered, data_definition=schema
+            )
             eval_curr = Dataset.from_pandas(df_curr_filtered, data_definition=schema)
             report = Report([DataDriftPreset()])
             my_eval = report.run(eval_curr, eval_ref)
-            report_dict = my_eval.dict() if hasattr(my_eval, "dict") else my_eval.as_dict()
-            
+            report_dict = (
+                my_eval.dict() if hasattr(my_eval, "dict") else my_eval.as_dict()
+            )
+
             metrics = report_dict.get("metrics", [])
             drift_flags = []
             drift_metrics = {"dataset_drift": False, "metrics": {}}
@@ -65,15 +77,28 @@ def run_evidently_drift_check():
                     val = float(m["value"])
                     threshold = float(m["config"]["threshold"])
                     method = m["config"]["method"]
-                    col_drift = 1.0 if ("distance" in method.lower() and val > threshold) or ("distance" not in method.lower() and val < threshold) else 0.0
+                    col_drift = (
+                        1.0
+                        if ("distance" in method.lower() and val > threshold)
+                        or ("distance" not in method.lower() and val < threshold)
+                        else 0.0
+                    )
                     drift_flags.append(col_drift)
                     drift_metrics["metrics"][f"{col}_drift_score"] = val
-            drift_detected = bool(len(drift_flags) > 0 and (sum(drift_flags) / len(drift_flags)) > 0.5)
+            drift_detected = bool(
+                len(drift_flags) > 0 and (sum(drift_flags) / len(drift_flags)) > 0.5
+            )
             drift_metrics["dataset_drift"] = drift_detected
         except Exception:
             report = Report(metrics=[DataDriftPreset()])
-            report.run(reference_data=df_reference_filtered, current_data=df_curr_filtered)
-            report_dict = report.as_dict() if hasattr(report, "as_dict") else getattr(report, "dict", lambda: {})()
+            report.run(
+                reference_data=df_reference_filtered, current_data=df_curr_filtered
+            )
+            report_dict = (
+                report.as_dict()
+                if hasattr(report, "as_dict")
+                else getattr(report, "dict", lambda: {})()
+            )
             metrics = report_dict.get("metrics", [])
             drift_detected = False
             drift_metrics = {"dataset_drift": False, "metrics": {}}
