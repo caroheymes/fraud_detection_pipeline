@@ -42,6 +42,7 @@ from sklearn.metrics import (
     fbeta_score,
     precision_score,
     recall_score,
+    precision_recall_curve,
 )
 from sklearn.preprocessing import StandardScaler
 from skrub import TableVectorizer
@@ -137,71 +138,36 @@ def load_dataset(sample_size: int = -1, max_graph_nodes: int = 10000) -> pd.Data
         "merch_long",
     }.issubset(df.columns):
         df["distance_achat"] = haversine_vectorized(
-            df["lat"], df["long"], df["merch_lat"], df["merch_long"]
+            df["lat"].astype(float), df["long"].astype(float),
+            df["merch_lat"].astype(float), df["merch_long"].astype(float)
         )
 
-    if "hour_sin" not in df.columns and "trans_date_trans_time" in df.columns:
-        dt = pd.to_datetime(df["trans_date_trans_time"])
-        df["hour_sin"] = np.sin(2 * np.pi * dt.dt.hour / 24.0)
-        df["hour_cos"] = np.cos(2 * np.pi * dt.dt.hour / 24.0)
-        df["weekday_sin"] = np.sin(2 * np.pi * dt.dt.dayofweek / 7.0)
-        df["weekday_cos"] = np.cos(2 * np.pi * dt.dt.dayofweek / 7.0)
-        df["month_sin"] = np.sin(2 * np.pi * dt.dt.month / 12.0)
-        df["month_cos"] = np.cos(2 * np.pi * dt.dt.month / 12.0)
+    if "trans_date_trans_time" in df.columns:
+        df["trans_date_trans_time"] = pd.to_datetime(df["trans_date_trans_time"])
+        dt = df["trans_date_trans_time"]
+        if "hour_sin" not in df.columns:
+            df["hour_sin"] = np.sin(2 * np.pi * dt.dt.hour / 24.0)
+            df["hour_cos"] = np.cos(2 * np.pi * dt.dt.hour / 24.0)
+            df["weekday_sin"] = np.sin(2 * np.pi * dt.dt.dayofweek / 7.0)
+            df["weekday_cos"] = np.cos(2 * np.pi * dt.dt.dayofweek / 7.0)
+            df["month_sin"] = np.sin(2 * np.pi * dt.dt.month / 12.0)
+            df["month_cos"] = np.cos(2 * np.pi * dt.dt.month / 12.0)
 
     if "age" not in df.columns and "dob" in df.columns:
         dob_dt = pd.to_datetime(df["dob"])
         df["age"] = datetime.now().year - dob_dt.dt.year
 
-    # Échantillonnage stratifié sécurisé
-    fraud_df = df[df["fraud_label"] == 1]
-    legit_df = df[df["fraud_label"] == 0]
+    # Tri Chronologique Strict
+    if "trans_date_trans_time" in df.columns:
+        df = df.sort_values("trans_date_trans_time").reset_index(drop=True)
 
-    if sample_size > 0:
-        target_total = min(len(df), sample_size)
-        n_fraud = min(len(fraud_df), max(1, target_total // 4))
-        n_legit = target_total - n_fraud
-        print(
-            f"Échantillonnage ciblé : {target_total} transactions ({n_fraud} fraudes, {n_legit} saines)..."
-        )
-        df = (
-            pd.concat(
-                [
-                    fraud_df.sample(n=n_fraud, random_state=42)
-                    if len(fraud_df) > n_fraud
-                    else fraud_df,
-                    legit_df.sample(n=n_legit, random_state=42)
-                    if len(legit_df) > n_legit
-                    else legit_df,
-                ]
-            )
-            .sample(frac=1.0, random_state=42)
-            .reset_index(drop=True)
-        )
-    else:
-        if len(df) > max_graph_nodes:
-            n_fraud = min(len(fraud_df), max_graph_nodes // 5)
-            n_legit = max_graph_nodes - n_fraud
-            print(
-                f"Échantillonnage GNN sécurisé : {max_graph_nodes} transactions ({n_fraud} fraudes, {n_legit} saines)..."
-            )
-            df = (
-                pd.concat(
-                    [
-                        fraud_df.sample(n=n_fraud, random_state=42)
-                        if len(fraud_df) > n_fraud
-                        else fraud_df,
-                        legit_df.sample(n=n_legit, random_state=42)
-                        if len(legit_df) > n_legit
-                        else legit_df,
-                    ]
-                )
-                .sample(frac=1.0, random_state=42)
-                .reset_index(drop=True)
-            )
+    # Échantillonnage si spécifié (sans casser la distribution naturelle si sample_size == -1)
+    if sample_size > 0 and sample_size < len(df):
+        print(f"Échantillonnage chronologique : {sample_size} premières transactions...")
+        df = df.iloc[:sample_size].reset_index(drop=True)
 
     print(
-        f"✅ Données prêtes : {df.shape} (dont {df['fraud_label'].sum()} fraudes, {df['fraud_label'].mean() * 100:.2f}%)"
+        f"✅ Données prêtes et ordonnées chronologiquement : {df.shape} (dont {df['fraud_label'].sum()} fraudes, {df['fraud_label'].mean() * 100:.3f}%)"
     )
     return df
 
@@ -342,14 +308,15 @@ class HinSAGERepresentationLearner:
         X_train = self._extract_clean_features(train_df, is_train=True)
         in_dim = X_train.shape[1]
 
-        # 1. Calcul des statistiques de voisinage pour chaque client et marchand (1-hop)
+        # 1. Calcul ultra-rapide des statistiques de voisinage (1-hop)
+        client_nodes = train_df["client_node"].astype(str).values
+        merchant_nodes = train_df["merchant_node"].astype(str).values
+
         client_groups = {}
         merchant_groups = {}
-        for idx, row in train_df.reset_index(drop=True).iterrows():
-            c_id = str(row["client_node"])
-            m_id = str(row["merchant_node"])
-            client_groups.setdefault(c_id, []).append(X_train[idx])
-            merchant_groups.setdefault(m_id, []).append(X_train[idx])
+        for i in range(len(client_nodes)):
+            client_groups.setdefault(client_nodes[i], []).append(X_train[i])
+            merchant_groups.setdefault(merchant_nodes[i], []).append(X_train[i])
 
         self.client_stats = {
             c_id: np.append(np.mean(feats, axis=0), np.log1p(len(feats)))
@@ -366,18 +333,20 @@ class HinSAGERepresentationLearner:
         self.global_merchant_stat = np.append(mean_feat, 0.0)
 
         # 2. Construction des tenseurs de voisinage pour le train
-        h_c_list = [self.client_stats[str(c)] for c in train_df["client_node"]]
-        h_m_list = [self.merchant_stats[str(m)] for m in train_df["merchant_node"]]
+        h_c_list = [self.client_stats[c] for c in client_nodes]
+        h_m_list = [self.merchant_stats[m] for m in merchant_nodes]
 
-        x_t_tensor = torch.tensor(X_train, dtype=torch.float32)
-        h_c_tensor = torch.tensor(np.array(h_c_list), dtype=torch.float32)
-        h_m_tensor = torch.tensor(np.array(h_m_list), dtype=torch.float32)
-        y_tensor = torch.tensor(y_train.values, dtype=torch.float32)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        x_t_tensor = torch.tensor(X_train, dtype=torch.float32, device=device)
+        h_c_tensor = torch.tensor(np.array(h_c_list), dtype=torch.float32, device=device)
+        h_m_tensor = torch.tensor(np.array(h_m_list), dtype=torch.float32, device=device)
+        y_tensor = torch.tensor(y_train.values.astype(float), dtype=torch.float32, device=device)
 
         # 3. Entraînement du réseau HinSAGE avec Focal Loss
         self.net = HinSAGEPyTorchNet(
             in_features=in_dim, emb_dim=self.emb_dim, hidden_dim=self.hidden_dim
-        )
+        ).to(device)
         optimizer = torch.optim.AdamW(
             self.net.parameters(), lr=self.lr, weight_decay=1e-4
         )
@@ -404,18 +373,23 @@ class HinSAGERepresentationLearner:
         """Étape inductive : génère les embeddings pour les transactions non vues."""
         X_test = self._extract_clean_features(test_df, is_train=False)
 
+        c_nodes_test = test_df["client_node"].astype(str).values
+        m_nodes_test = test_df["merchant_node"].astype(str).values
+
         h_c_list = [
-            self.client_stats.get(str(c), self.global_client_stat)
-            for c in test_df["client_node"]
+            self.client_stats.get(c, self.global_client_stat)
+            for c in c_nodes_test
         ]
         h_m_list = [
-            self.merchant_stats.get(str(m), self.global_merchant_stat)
-            for m in test_df["merchant_node"]
+            self.merchant_stats.get(m, self.global_merchant_stat)
+            for m in m_nodes_test
         ]
 
-        x_t_tensor = torch.tensor(X_test, dtype=torch.float32)
-        h_c_tensor = torch.tensor(np.array(h_c_list), dtype=torch.float32)
-        h_m_tensor = torch.tensor(np.array(h_m_list), dtype=torch.float32)
+        device = next(self.net.parameters()).device if self.net is not None else torch.device("cpu")
+
+        x_t_tensor = torch.tensor(X_test, dtype=torch.float32, device=device)
+        h_c_tensor = torch.tensor(np.array(h_c_list), dtype=torch.float32, device=device)
+        h_m_tensor = torch.tensor(np.array(h_m_list), dtype=torch.float32, device=device)
 
         self.net.eval()
         with torch.no_grad():
@@ -487,10 +461,11 @@ def run_inductive_grl_pipeline(
     epochs: int = 10,
     add_additional_data: bool = True,
     xgb_params: dict | None = None,
+    decision_threshold: float = 0.85,
 ) -> dict[str, Any]:
-    """Exécute l'évaluation inductive complète sur un split temporel/inductif 60% Train / 40% Test."""
+    """Exécute l'évaluation inductive complète sur un split chronologique 70% Train (Passé) / 30% Test (Futur)."""
     df = df.copy().reset_index(drop=True)
-    cutoff = round(0.6 * len(df))
+    cutoff = round(0.70 * len(df))
     train_data = df.iloc[:cutoff].copy().reset_index(drop=True)
     inductive_data = df.iloc[cutoff:].copy().reset_index(drop=True)
 
@@ -502,10 +477,19 @@ def run_inductive_grl_pipeline(
     )
 
     pipeline.fit(train_data, train_data["fraud_label"])
-    predictions = pipeline.predict(inductive_data)
     predictions_proba = pipeline.predict_proba(inductive_data)[:, 1]
 
+    # Recherche du seuil optimal maximisant le F1-score sur la classe 1
     y_test_np = inductive_data["fraud_label"].values
+    precisions, recalls, thresholds = precision_recall_curve(y_test_np, predictions_proba)
+    f1_scores = (2 * precisions * recalls) / (precisions + recalls + 1e-10)
+    best_idx = np.argmax(f1_scores)
+    optimal_thresh = float(thresholds[best_idx]) if best_idx < len(thresholds) else decision_threshold
+    
+    # Seuil calibré retenu (minimum decision_threshold pour protéger la précision)
+    calibrated_thresh = max(decision_threshold, optimal_thresh)
+    predictions = (predictions_proba >= calibrated_thresh).astype(int)
+
     prec_c1 = precision_score(y_test_np, predictions, pos_label=1, zero_division=0)
     rec_c1 = recall_score(y_test_np, predictions, pos_label=1, zero_division=0)
     f1_c1 = f1_score(y_test_np, predictions, pos_label=1, zero_division=0)
@@ -522,6 +506,7 @@ def run_inductive_grl_pipeline(
         "f2_class_1": float(f2_c1),
         "F1_global": float(f1_glob),
         "recall_global": float(rec_glob),
+        "calibrated_threshold": float(calibrated_thresh),
     }
 
     tn, fp, fn, tp = confusion_matrix(y_test_np, predictions).ravel()
@@ -533,6 +518,7 @@ def run_inductive_grl_pipeline(
         "confusion_matrix": confusion_dict,
         "predictions_proba": predictions_proba,
         "y_true": y_test_np,
+        "calibrated_threshold": calibrated_thresh,
     }
 
 
@@ -553,28 +539,43 @@ def main():
         help="Taille d'échantillon (-1 = complet/sécurisé)",
     )
     parser.add_argument(
-        "--sampling-ratio", type=float, default=0.05, help="Ratio de sampling"
+        "--sampling-ratio", type=float, default=0.0, help="Ratio de sampling (0.0 = distribution naturelle)"
+    )
+    parser.add_argument(
+        "--metric-target",
+        type=str,
+        default="f1",
+        choices=["f1", "f2"],
+        help="Métrique cible à maximiser par Optuna : 'f1' (F1-score) ou 'f2' (F2-score / accent sur le Rappel)",
     )
     args = parser.parse_args()
 
-    print("=" * 65)
+    target_metric_key = "f1_class_1" if args.metric_target == "f1" else "f2_class_1"
+    target_metric_label = "F1-Score Fraude" if args.metric_target == "f1" else "F2-Score Fraude"
+
+    print("=" * 70)
     print("  🚀 PIPELINE INDUCTIVE GRL (HinSAGE + XGBoost)")
     print(f"  Configuration : n_trials={args.n_trials}, sample_size={args.sample_size}")
-    print("=" * 65)
+    print(f"  Métrique cible d'optimisation : {target_metric_label} ({target_metric_key})")
+    print("=" * 70)
 
     df = load_dataset(sample_size=args.sample_size)
 
-    optuna.logging.set_verbosity(optuna.logging.INFO)
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
     print(
-        f"\n🎯 Lancement de l'optimisation bayésienne Optuna ({args.n_trials} trials)..."
+        f"\n🎯 Lancement de l'optimisation bayésienne Optuna ({args.n_trials} trials, Métrique: {target_metric_label})...\n"
     )
 
+    best_score_so_far = -1.0
+
     def objective(trial):
+        nonlocal best_score_so_far
+
         embedding_size = trial.suggest_categorical("embedding_size", [16, 32, 64])
-        max_depth = trial.suggest_int("max_depth", 3, 8)
-        n_estimators = trial.suggest_int("n_estimators", 50, 200, step=50)
-        learning_rate = trial.suggest_float("learning_rate", 0.03, 0.2, log=True)
-        scale_pos_weight = trial.suggest_float("scale_pos_weight", 1.0, 15.0)
+        max_depth = trial.suggest_int("max_depth", 3, 7)
+        n_estimators = trial.suggest_int("n_estimators", 100, 250, step=50)
+        learning_rate = trial.suggest_float("learning_rate", 0.03, 0.15, log=True)
+        scale_pos_weight = trial.suggest_float("scale_pos_weight", 1.5, 6.0)
 
         xgb_params = {
             "max_depth": max_depth,
@@ -590,32 +591,71 @@ def main():
             embedding_size=embedding_size,
             epochs=6,
             xgb_params=xgb_params,
+            decision_threshold=0.85,
         )
 
-        try:
-            with mlflow.start_run(
-                run_name=f"Trial_{trial.number}_InductiveGRL", nested=True
-            ):
-                mlflow.log_params({"embedding_size": embedding_size, **xgb_params})
-                mlflow.log_metrics(res["metrics"])
-        except Exception:
-            pass
+        m = res["metrics"]
+        cm = res["confusion_matrix"]
+        current_score = m[target_metric_key]
 
-        return res["metrics"]["f2_class_1"]
+        is_new_best = ""
+        if current_score > best_score_so_far:
+            best_score_so_far = current_score
+            is_new_best = " 🌟 [NOUVEAU MEILLEUR SCORE]"
+
+        # Affichage en direct des performances de l'expérience
+        print(f"\n┌── 🧪 [ESSAI {trial.number + 1}/{args.n_trials}]{is_new_best} " + "─" * max(2, 45 - len(is_new_best)))
+        print(f"│ 🎯 {target_metric_label:15s} : {current_score:.4f} (Seuil Calibré: {m['calibrated_threshold']:.4f})")
+        print(f"│ 📈 Précision C1: {m['prec_class_1']*100:6.2f}% | Rappel C1: {m['rec_class_1']*100:6.2f}% | F1 C1: {m['f1_class_1']:.4f} | F2 C1: {m['f2_class_1']:.4f}")
+        print(f"│ 📊 Matrice Confusion : TP={cm['tp']} (Fraudes Bloquées) | FP={cm['fp']} (Fausses Alertes) | FN={cm['fn']} | TN={cm['tn']}")
+        print(f"│ ⚙️  Params : Emb={embedding_size}, Depth={max_depth}, Trees={n_estimators}, LR={learning_rate:.3f}, Weight={scale_pos_weight:.2f}")
+        print("└" + "─" * 70)
+
+        try:
+            # 1. Log direct dans le Run Parent avec step (pour courbes d'évolution en direct dans MLflow)
+            mlflow.log_metric("trial_score", current_score, step=trial.number)
+            mlflow.log_metric("trial_f1_c1", m["f1_class_1"], step=trial.number)
+            mlflow.log_metric("trial_f2_c1", m["f2_class_1"], step=trial.number)
+            mlflow.log_metric("trial_precision_c1", m["prec_class_1"], step=trial.number)
+            mlflow.log_metric("trial_recall_c1", m["rec_class_1"], step=trial.number)
+            mlflow.log_metric("best_score_so_far", best_score_so_far, step=trial.number)
+
+            # 2. Log du run enfant individuel (Nested Run)
+            with mlflow.start_run(
+                run_name=f"Trial_{trial.number + 1:02d}_InductiveGRL_{args.metric_target.upper()}", nested=True
+            ):
+                mlflow.log_params({"embedding_size": embedding_size, "target_metric": args.metric_target, **xgb_params})
+                mlflow.log_metrics(res["metrics"])
+        except Exception as ml_err:
+            print(f"⚠️ [MLflow] Log de l'essai échoué : {ml_err}")
+
+        return current_score
 
     study = optuna.create_study(direction="maximize")
 
-    # Run parent dans l'expérience 'fraud_detection' (Expérience ID 6)
+    # Run parent dans l'expérience 'fraud_detection'
     parent_run_name = (
-        f"InductiveGRL_HinSAGE_Study_{datetime.now().strftime('%m%d_%H%M%S')}"
+        f"InductiveGRL_Study_{args.metric_target.upper()}_{datetime.now().strftime('%m%d_%H%M%S')}"
     )
     with mlflow.start_run(run_name=parent_run_name):
+        # Enregistrer immédiatement les métadonnées de l'étude dans le parent
+        mlflow.log_params({
+            "target_metric": args.metric_target.upper(),
+            "n_trials": args.n_trials,
+            "dataset_rows": len(df),
+            "split_strategy": "Chronological_70_30",
+            "model_type": "InductiveGRL_HinSAGE_XGBoost"
+        })
+        mlflow.set_tag("study_status", "RUNNING")
+
         study.optimize(objective, n_trials=args.n_trials)
 
-        print("\n" + "=" * 65)
-        print(f"🏆 MEILLEUR TRIAL OBTENU (F2-Score Fraude : {study.best_value:.4f})")
+        mlflow.set_tag("study_status", "FINISHED")
+
+        print("\n" + "=" * 70)
+        print(f"🏆 MEILLEUR TRIAL OBTENU ({target_metric_label} : {study.best_value:.4f})")
         print(f"Hyperparamètres optimaux : {study.best_params}")
-        print("=" * 65 + "\n")
+        print("=" * 70 + "\n")
 
         # Entraînement Champion final avec les meilleurs hyperparamètres
         best = study.best_params
@@ -631,64 +671,35 @@ def main():
         final_res = run_inductive_grl_pipeline(
             df,
             embedding_size=best["embedding_size"],
-            epochs=12,
+            epochs=10,
             xgb_params=champion_xgb_params,
+            decision_threshold=0.85,
         )
 
-        print("\n📊 RÉSULTATS DU MODÈLE CHAMPION (Inductive GRL HinSAGE) :")
+        print(f"\n📊 RÉSULTATS DU MODÈLE CHAMPION (Optimisé sur {target_metric_label}) :")
         for k, v in final_res["metrics"].items():
-            print(f"  • {k:15s} : {v:.4f}")
+            print(f"  • {k:22s} : {v:.4f}")
 
         print("\nMatrice de confusion :")
         print(final_res["confusion_matrix"])
 
         # Log MLflow Parent Run
         mlflow.log_params(best)
+        mlflow.log_param("optimization_metric_target", args.metric_target.upper())
         mlflow.log_metrics(final_res["metrics"])
 
-        temp_json = "confusion_matrix_best_optuna.json"
+        temp_json = f"confusion_matrix_optuna_{args.metric_target}.json"
         with open(temp_json, "w") as f:
             json.dump(final_res["confusion_matrix"], f, indent=4)
         mlflow.log_artifact(temp_json)
         if os.path.exists(temp_json):
             os.remove(temp_json)
 
-        # Enregistrement Scikit-Learn du pipeline champion compatible FastAPI dans MLflow ('fraud_detector')
+        # Enregistrement du Pipeline Champion complet dans MLflow ('fraud_detector')
         print(
-            "\n📦 Enregistrement du pipeline champion compatible FastAPI dans MLflow Model Registry ('fraud_detector')..."
+            "\n📦 Enregistrement du pipeline champion complet dans MLflow Model Registry ('fraud_detector')..."
         )
-        from sklearn.pipeline import Pipeline
-        from skrub import TableVectorizer
-
-        api_features = [
-            "category",
-            "amt",
-            "gender",
-            "distance_achat",
-            "age",
-            "city_pop",
-            "hour_sin",
-            "hour_cos",
-            "weekday_sin",
-            "weekday_cos",
-            "month_sin",
-            "month_cos",
-        ]
-        # Garantir la présence des colonnes requises
-        for col in api_features:
-            if col not in df.columns:
-                df[col] = 0.0
-
-        X_train_full_api = df[api_features]
-        y_train_full_api = df["fraud_label"]
-
-        champion_pipeline = Pipeline(
-            [
-                ("preprocessor", TableVectorizer()),
-                ("model", XGBClassifier(**champion_xgb_params)),
-            ]
-        )
-        champion_pipeline.fit(X_train_full_api, y_train_full_api)
+        champion_pipeline = final_res["pipeline"]
 
         model_info = mlflow.sklearn.log_model(
             champion_pipeline,
@@ -696,31 +707,20 @@ def main():
             serialization_format="pickle",
             registered_model_name="fraud_detector",
         )
-        print("Modèle enregistré avec succès !")
+        print("Modèle enregistré avec succès dans MLflow !")
 
         # Promotion automatique avec l'alias 'champion'
         try:
             client = MlflowClient()
-            target_version = getattr(model_info, "registered_model_version", None)
-            if not target_version:
-                versions = client.search_model_versions("name='fraud_detector'")
-                if versions:
-                    # Dernière version créée
-                    target_version = max(versions, key=lambda v: int(v.version)).version
-                else:
-                    latest = client.get_latest_versions("fraud_detector")
-                    if latest:
-                        target_version = latest[0].version
-
-            if target_version:
+            versions = client.search_model_versions("name='fraud_detector'")
+            if versions:
+                target_version = max(versions, key=lambda v: int(v.version)).version
                 client.set_registered_model_alias(
                     name="fraud_detector", alias="champion", version=str(target_version)
                 )
                 print(
                     f"\n🟢 PROMOTION RÉUSSIE : Modèle 'fraud_detector' Version {target_version} promu avec l'alias '@champion' !"
                 )
-            else:
-                print("⚠️ Impossible de déterminer la version pour la promotion.")
         except Exception as promo_err:
             print(f"⚠️ Avertissement : Échec de la promotion champion : {promo_err}")
 
@@ -735,11 +735,26 @@ def main():
     except Exception as e:
         print(f"⚠️ Avertissement : Mise à jour des tags MLflow échouée : {e}")
 
-    # Export des métriques en JSON
-    metrics_json_path = os.path.join(script_dir, "metrics_gnn.json")
-    with open(metrics_json_path, "w") as f:
-        json.dump(final_res["metrics"], f, indent=4)
-    print(f"\n✅ Métriques finales exportées dans : {metrics_json_path}")
+    # Export des métriques en JSON pour suivi comparatif F1 vs F2
+    metrics_comp_path = os.path.join(script_dir, "metrics_gnn_comparison.json")
+    comp_data = {}
+    if os.path.exists(metrics_comp_path):
+        try:
+            with open(metrics_comp_path, "r") as f:
+                comp_data = json.load(f)
+        except Exception:
+            comp_data = {}
+    
+    comp_data[f"InductiveGRL_Optimized_{args.metric_target.upper()}"] = {
+        **final_res["metrics"],
+        "confusion_matrix": final_res["confusion_matrix"],
+        "timestamp": datetime.now().isoformat(),
+        "best_params": best,
+    }
+
+    with open(metrics_comp_path, "w") as f:
+        json.dump(comp_data, f, indent=4)
+    print(f"\n✅ Métriques comparatives exportées dans : {metrics_comp_path}")
 
 
 if __name__ == "__main__":

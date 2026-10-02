@@ -146,7 +146,7 @@ class WebhookRequest(BaseModel):
 # Variables globales pour le modèle ML
 model_pipeline = None
 model_run_id = "unknown"
-DECISION_THRESHOLD = float(os.getenv("DECISION_THRESHOLD", "0.75"))
+DECISION_THRESHOLD = float(os.getenv("DECISION_THRESHOLD", "0.85"))
 
 
 # --- 4. FONCTIONS DE CALCUL AUXILIAIRES ---
@@ -163,12 +163,18 @@ def haversine_vectorized(lat1, lon1, lat2, lon2):
 # --- 4.5. CALCUL SHAP EN TEMPS RÉEL (EXPLICABILITÉ) ---
 def compute_shap_values(model_pipeline, X):
     try:
-        preprocessor = model_pipeline.named_steps["preprocessor"]
-        predictor = model_pipeline.named_steps["model"]
-
-        # Encodage des features
-        X_enc = preprocessor.transform(X)
-        feature_names = list(preprocessor.get_feature_names_out())
+        if hasattr(model_pipeline, "named_steps"):
+            preprocessor = model_pipeline.named_steps["preprocessor"]
+            predictor = model_pipeline.named_steps["model"]
+            X_enc = preprocessor.transform(X)
+            feature_names = list(preprocessor.get_feature_names_out())
+        elif hasattr(model_pipeline, "classifier"):
+            predictor = model_pipeline.classifier
+            test_embeddings = model_pipeline.hinsage.transform(X)
+            X_enc = model_pipeline._prepare_features(X, test_embeddings)
+            feature_names = list(model_pipeline.get_feature_names_out())
+        else:
+            return [{} for _ in range(len(X))]
 
         # Convertir en DataFrame pour l'explication si c'est un tableau numpy
         if not isinstance(X_enc, pd.DataFrame):
@@ -214,7 +220,6 @@ def compute_shap_values(model_pipeline, X):
         return shap_dicts
     except Exception as e:
         print(f"[SHAP API Engine] Échec du calcul SHAP : {e}")
-        # Repli sur des valeurs vides en cas d'erreur
         return [{} for _ in range(len(X))]
 
 
