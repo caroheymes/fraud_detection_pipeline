@@ -5,7 +5,6 @@ import json
 import os
 
 import mlflow
-import redis
 import streamlit as st
 from mlflow.tracking import MlflowClient
 
@@ -57,20 +56,18 @@ c1, c2 = st.columns(2)
 with c1:
     st.subheader("🔒 Statut global d'observabilité MLOps")
 
-    # Lecture des règles Redis
+    # Lecture des règles Redis via src.utils.db
     redis_available = False
     rules = {}
     try:
-        r = redis.Redis(
-            host=os.getenv("REDIS_HOST", "redis"),
-            port=int(os.getenv("REDIS_PORT", 6379)),
-            db=0,
-            decode_responses=True,
-        )
-        rules_raw = r.get("fraud_rules:config")
-        if rules_raw:
-            rules = json.loads(rules_raw)
-            redis_available = True
+        from src.utils.db import get_redis_client
+
+        r = get_redis_client()
+        if r is not None:
+            rules_raw = r.get("fraud_rules:config")
+            if rules_raw:
+                rules = json.loads(rules_raw)
+                redis_available = True
     except Exception:
         pass
 

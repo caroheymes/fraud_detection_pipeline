@@ -1,7 +1,6 @@
-# src/dashboard/pages/1_Performances_and_Metriques.py
-
 import json
 import os
+import sys
 from datetime import datetime, timedelta
 
 import mlflow
@@ -9,6 +8,12 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from mlflow.tracking import MlflowClient
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from src.utils.db import get_postgres_engine
 
 st.set_page_config(page_title="Performances & Métriques", page_icon="📈", layout="wide")
 
@@ -18,18 +23,10 @@ st.markdown("---")
 
 # Utilitaires de base de données
 def query_db(query):
-    import psycopg2
-
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("POSTGRES_HOST", "postgres"),
-            database=os.getenv("POSTGRES_DB", "fraud-detection"),
-            user=os.getenv("POSTGRES_USER", "fraud-detection"),
-            password=os.getenv("POSTGRES_PASSWORD", "fraud-detection_password"),
-            port=os.getenv("POSTGRES_PORT", "5432"),
-        )
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        engine = get_postgres_engine()
+        with engine.connect() as conn:
+            df = pd.read_sql_query(query, conn)
         return df, None
     except Exception as e:
         return None, str(e)
@@ -477,63 +474,164 @@ if df_daily_raw is not None and not df_daily_raw.empty:
                 name=label,
                 line=dict(color=color_map.get(label, "#3B82F6"), width=2.5),
                 marker=dict(size=5),
+                connectgaps=True,
                 hovertemplate="<b>Date :</b> %{x|%d/%m/%Y}<br><b>"
                 + label
                 + " :</b> %{y:.4f}<extra></extra>",
             )
         )
 
+    # Récupération dynamique des dates d'introduction des différents modèles
+    model_transitions_query = """
+        SELECT 
+            model_version, 
+            MIN(trans_date_trans_time::date) as debut_model
+        FROM silver.rawdata
+        WHERE model_version IS NOT NULL
+        GROUP BY model_version
+        ORDER BY debut_model ASC;
+    """
+    df_models_trans, _ = query_db(model_transitions_query)
+
+    # Graphique de répartition quotidienne des volumes de fraudes
+    fig_bars = go.Figure()
+    fig_bars.add_trace(
+        go.Bar(
+            x=df_filtered["jour"],
+            y=df_filtered["tp"],
+            name="Vrais Positifs (TP - Fraudes bloquées)",
+            marker_color="#10B981",
+        )
+    )
+    fig_bars.add_trace(
+        go.Bar(
+            x=df_filtered["jour"],
+            y=df_filtered["fn"],
+            name="Faux Négatifs (FN - Fraudes manquées)",
+            marker_color="#EF4444",
+        )
+    )
+    fig_bars.add_trace(
+        go.Bar(
+            x=df_filtered["jour"],
+            y=df_filtered["fp"],
+            name="Faux Positifs (FP - Fausses alertes)",
+            marker_color="#F59E0B",
+        )
+    )
+    fig_bars.update_layout(
+        barmode="group",
+        title=dict(
+            text="📊 Volumes Quotidiens : Détections Réussies vs Erreurs",
+            y=0.98,
+            x=0,
+            xanchor="left",
+            yanchor="top",
+        ),
+        xaxis_title="Date",
+        yaxis_title="Nombre de transactions",
+        legend=dict(orientation="h", yanchor="bottom", y=1.18, xanchor="right", x=1),
+        height=380,
+        margin=dict(l=20, r=30, t=100, b=20),
+    )
+
+    # Ajout des barres verticales pointillées d'introduction de modèle
+    if df_models_trans is not None and not df_models_trans.empty:
+        df_models_trans["debut_model"] = pd.to_datetime(df_models_trans["debut_model"])
+        min_p_date = pd.to_datetime(plot_df["jour"].min()).floor("D")
+        max_p_date = pd.to_datetime(plot_df["jour"].max()).ceil("D")
+
+        colors = ["#64748B", "#3B82F6", "#8B5CF6", "#DC2626", "#059669", "#D97706"]
+        for idx, r_mod in df_models_trans.iterrows():
+            m_date = pd.to_datetime(r_mod["debut_model"])
+            m_raw = str(r_mod["model_version"])
+
+            if min_p_date <= m_date <= (max_p_date + pd.Timedelta(days=1)):
+                # Formatage propre du libellé
+                lbl = m_raw.replace("fraud_detector_", "").replace("_", " ").title()
+                if "v7" in m_raw.lower():
+                    lbl += " (Dérive)"
+                elif "v11" in m_raw.lower():
+                    lbl += " (GRL)"
+                elif "v12" in m_raw.lower():
+                    lbl += " (Champion V12)"
+                c = colors[idx % len(colors)]
+                date_str = m_date.strftime("%Y-%m-%d")
+
+                # Détection de proximité du bord droit pour ancrage
+                is_near_right = m_date >= (max_p_date - pd.Timedelta(days=3))
+                anchor_pos = "right" if is_near_right else "left"
+
+                # Barre verticale sur la courbe temporelle
+                fig_time.add_shape(
+                    type="line",
+                    x0=date_str,
+                    x1=date_str,
+                    y0=0,
+                    y1=1,
+                    yref="paper",
+                    line=dict(color=c, width=1.5, dash="dash"),
+                )
+                fig_time.add_annotation(
+                    x=date_str,
+                    y=1.02,
+                    yref="paper",
+                    text=f"<b>📌 {lbl}</b>",
+                    showarrow=False,
+                    xanchor=anchor_pos,
+                    yanchor="bottom",
+                    font=dict(size=10, color=c),
+                    bgcolor="rgba(255, 255, 255, 0.9)",
+                    bordercolor=c,
+                    borderwidth=1,
+                    borderpad=3,
+                )
+
+                # Barre verticale sur les volumes TP/FP/FN
+                fig_bars.add_shape(
+                    type="line",
+                    x0=date_str,
+                    x1=date_str,
+                    y0=0,
+                    y1=1,
+                    yref="paper",
+                    line=dict(color=c, width=1.2, dash="dash"),
+                )
+                fig_bars.add_annotation(
+                    x=date_str,
+                    y=1.02,
+                    yref="paper",
+                    text=f"<b>📌 {lbl}</b>",
+                    showarrow=False,
+                    xanchor=anchor_pos,
+                    yanchor="bottom",
+                    font=dict(size=9, color=c),
+                    bgcolor="rgba(255, 255, 255, 0.9)",
+                    bordercolor=c,
+                    borderwidth=1,
+                    borderpad=3,
+                )
+
     fig_time.update_layout(
-        title="📈 Évolution Quotidienne des Métriques (Flux de Production)",
+        title=dict(
+            text="📈 Évolution Quotidienne des Métriques (Flux de Production)",
+            y=0.98,
+            x=0,
+            xanchor="left",
+            yanchor="top",
+        ),
         xaxis_title="Date de transaction",
         yaxis_title="Score (0 à 1)",
         yaxis=dict(range=[0.0, 1.05], gridcolor="#E5E7EB"),
         xaxis=dict(gridcolor="#E5E7EB"),
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        height=420,
-        margin=dict(l=20, r=20, t=60, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.18, xanchor="right", x=1),
+        height=480,
+        margin=dict(l=20, r=30, t=110, b=20),
     )
     st.plotly_chart(fig_time, use_container_width=True)
 
-    # Graphique de répartition quotidienne des volumes de fraudes
     with st.expander("📊 Détail quotidien des volumes de détection (TP, FP, FN)"):
-        fig_bars = go.Figure()
-        fig_bars.add_trace(
-            go.Bar(
-                x=df_filtered["jour"],
-                y=df_filtered["tp"],
-                name="Vrais Positifs (TP - Fraudes bloquées)",
-                marker_color="#10B981",
-            )
-        )
-        fig_bars.add_trace(
-            go.Bar(
-                x=df_filtered["jour"],
-                y=df_filtered["fn"],
-                name="Faux Négatifs (FN - Fraudes manquées)",
-                marker_color="#EF4444",
-            )
-        )
-        fig_bars.add_trace(
-            go.Bar(
-                x=df_filtered["jour"],
-                y=df_filtered["fp"],
-                name="Faux Positifs (FP - Fausses alertes)",
-                marker_color="#F59E0B",
-            )
-        )
-        fig_bars.update_layout(
-            barmode="group",
-            title="Volumes Quotidiens : Détections Réussies vs Erreurs",
-            xaxis_title="Date",
-            yaxis_title="Nombre de transactions",
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-            ),
-            height=320,
-            margin=dict(l=20, r=20, t=50, b=20),
-        )
         st.plotly_chart(fig_bars, use_container_width=True)
 else:
     st.info("Aucune donnée de prédiction historique trouvée dans la base PostgreSQL.")

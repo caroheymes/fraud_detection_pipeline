@@ -1,0 +1,56 @@
+{
+    "InductiveGRL_Optimized_F2": {
+        "pr_auc": 0.5337060308163213,
+        "auprc": 0.5337060308163213,
+        "roc_auc": 0.9822171395782158,
+        "accuracy": 0.9950157791915043,
+        "prec_class_1": 0.4122448979591837,
+        "rec_class_1": 0.6474358974358975,
+        "f1_class_1": 0.5037406483790524,
+        "f2_class_1": 0.5811277330264673,
+        "F1_global": 0.7506179799773702,
+        "recall_global": 0.8219075388612729,
+        "decision_threshold": 0.2915,
+        "confusion_matrix": {
+            "tn": 39626,
+            "fp": 144,
+            "fn": 55,
+            "tp": 101
+        },
+        "timestamp": "2026-10-05T13:13:55.942599",
+        "best_params": {
+            "embedding_size": 16,
+            "max_depth": 7,
+            "n_estimators": 200,
+            "learning_rate": 0.03967452243539659,
+            "scale_pos_weight": 1.8480402578956432
+        }
+    },
+    "InductiveGRL_Optimized_F1": {
+        "pr_auc": 1.0,
+        "auprc": 1.0,
+        "roc_auc": 1.0,
+        "accuracy": 0.9988888888888889,
+        "prec_class_1": 0.6666666666666666,
+        "rec_class_1": 1.0,
+        "f1_class_1": 0.8,
+        "f2_class_1": 0.9090909090909091,
+        "F1_global": 0.8997214484679665,
+        "recall_global": 0.9994432071269488,
+        "decision_threshold": 0.5836,
+        "confusion_matrix": {
+            "tn": 897,
+            "fp": 1,
+            "fn": 0,
+            "tp": 2
+        },
+        "timestamp": "2026-10-05T12:53:02.547304",
+        "best_params": {
+            "embedding_size": 16,
+            "max_depth": 6,
+            "n_estimators": 100,
+            "learning_rate": 0.13187314925610022,
+            "scale_pos_weight": 2.3532562642764803
+        }
+    }
+}

@@ -1,14 +1,19 @@
-# src/dashboard/pages/3_Rapports_Decisionnels_Gold.py
-
 import os
+import sys
 
-import mlflow
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from mlflow.tracking import MlflowClient
 from shapash import SmartExplainer
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from src.utils.db import get_postgres_engine
+from src.utils.features import haversine_vectorized
+from src.utils.mlflow_manager import load_champion_model
 
 st.set_page_config(
     page_title="Rapports Décisionnels Gold (dbt)", page_icon="🥇", layout="wide"
@@ -21,19 +26,15 @@ st.write(
 st.markdown("---")
 
 
-def query_db(query):
-    import psycopg2
-
+def query_db(query, params=None):
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("POSTGRES_HOST", "postgres"),
-            database=os.getenv("POSTGRES_DB", "fraud-detection"),
-            user=os.getenv("POSTGRES_USER", "fraud-detection"),
-            password=os.getenv("POSTGRES_PASSWORD", "fraud-detection_password"),
-            port=os.getenv("POSTGRES_PORT", "5432"),
-        )
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        from sqlalchemy import text
+
+        engine = get_postgres_engine()
+        with engine.connect() as conn:
+            if isinstance(query, str):
+                query = text(query)
+            df = pd.read_sql_query(query, conn, params=params)
         return df, None
     except Exception as e:
         return None, str(e)
@@ -41,38 +42,12 @@ def query_db(query):
 
 @st.cache_resource
 def load_champion_explainer_assets():
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
     try:
-        client = MlflowClient()
-        version_details = client.get_model_version_by_alias(
-            "fraud_detector", "champion"
-        )
-        run_id = version_details.run_id
-        model = mlflow.sklearn.load_model(f"runs:/{run_id}/model")
-        return model.named_steps["preprocessor"], model.named_steps["model"]
-    except Exception:
-        try:
-            client = MlflowClient()
-            experiment = client.get_experiment_by_name("Default")
-            runs = client.search_runs(
-                experiment_ids=[experiment.experiment_id], order_by=["start_time DESC"]
-            )
-            if len(runs) > 0:
-                model = mlflow.sklearn.load_model(f"runs:/{runs[0].info.run_id}/model")
-                return model.named_steps["preprocessor"], model.named_steps["model"]
-        except Exception:
-            pass
-    return None, None
-
-
-def haversine_vectorized(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
-    return R * c
+        model, version_id, _threshold = load_champion_model()
+        return model, version_id
+    except Exception as e:
+        st.warning(f"Erreur de chargement du champion : {e}")
+        return None, None
 
 
 # ==========================================================
@@ -359,13 +334,13 @@ elif df_pareto is not None and not df_pareto.empty:
     )
 
 if target_merchant:
-    tx_query = f"""
+    tx_query = """
         SELECT * FROM silver.rawdata
-        WHERE merchant = '{target_merchant}' AND prediction = 1
+        WHERE merchant = :merchant AND prediction = 1
         ORDER BY trans_date_trans_time DESC
         LIMIT 50
     """
-    df_tx_list, tx_err = query_db(tx_query)
+    df_tx_list, tx_err = query_db(tx_query, params={"merchant": target_merchant})
 
     if tx_err:
         st.error(f"Impossible de récupérer les transactions du marchand : {tx_err}")
@@ -384,9 +359,10 @@ if target_merchant:
         tx_id = tx_row["trans_num"].iloc[0]
         tx_row.index = [tx_id]
 
-        preprocessor, predictor = load_champion_explainer_assets()
+        model_res = load_champion_explainer_assets()
+        champion_model = model_res[0] if model_res else None
 
-        if preprocessor is not None and predictor is not None:
+        if champion_model is not None:
             df_tx_list_proc = df_tx_list.copy()
             df_tx_list_proc.index = df_tx_list_proc["trans_num"].tolist()
 
@@ -416,6 +392,13 @@ if target_merchant:
             df_tx_list_proc["month_sin"] = np.sin(2 * np.pi * dt_cols.dt.month / 12.0)
             df_tx_list_proc["month_cos"] = np.cos(2 * np.pi * dt_cols.dt.month / 12.0)
 
+            if "client_node" not in df_tx_list_proc.columns:
+                df_tx_list_proc["client_node"] = df_tx_list_proc["cc_num"].astype(str)
+            if "merchant_node" not in df_tx_list_proc.columns:
+                df_tx_list_proc["merchant_node"] = df_tx_list_proc["merchant"].astype(
+                    str
+                )
+
             features_list = [
                 "category",
                 "amt",
@@ -433,23 +416,6 @@ if target_merchant:
             X_all = df_tx_list_proc[features_list]
             y_all = df_tx_list_proc["is_fraud"]
 
-            X_enc_all = preprocessor.transform(X_all)
-            if hasattr(preprocessor, "get_feature_names_out"):
-                cols = [c.split("__")[-1] for c in preprocessor.get_feature_names_out()]
-            else:
-                cols = X_all.columns.tolist()
-
-            if not isinstance(X_enc_all, pd.DataFrame):
-                X_enc_all = pd.DataFrame(
-                    X_enc_all, columns=cols, index=df_tx_list_proc.index
-                )
-            else:
-                X_enc_all.columns = [c.split("__")[-1] for c in X_enc_all.columns]
-                X_enc_all.index = df_tx_list_proc.index
-
-            # Extraction de la ligne spécifique pour l'affichage des détails
-            tx_row = df_tx_list_proc.loc[[tx_id]]
-
             features_groups = {
                 "Heure": ["hour_sin", "hour_cos"],
                 "Jour de la semaine": ["weekday_sin", "weekday_cos"],
@@ -464,6 +430,59 @@ if target_merchant:
                 "gender": "Genre",
             }
 
+            if hasattr(champion_model, "named_steps"):
+                preprocessor = champion_model.named_steps["preprocessor"]
+                predictor = champion_model.named_steps["model"]
+                X_enc_all = preprocessor.transform(X_all)
+                if hasattr(preprocessor, "get_feature_names_out"):
+                    cols = [
+                        c.split("__")[-1] for c in preprocessor.get_feature_names_out()
+                    ]
+                else:
+                    cols = X_all.columns.tolist()
+
+                if not isinstance(X_enc_all, pd.DataFrame):
+                    X_enc_all = pd.DataFrame(
+                        X_enc_all, columns=cols, index=df_tx_list_proc.index
+                    )
+                else:
+                    X_enc_all.columns = [c.split("__")[-1] for c in X_enc_all.columns]
+                    X_enc_all.index = df_tx_list_proc.index
+            elif hasattr(champion_model, "hinsage") and hasattr(
+                champion_model, "classifier"
+            ):
+                test_embeddings = champion_model.hinsage.transform(df_tx_list_proc)
+                raw_scaled = champion_model.hinsage._extract_clean_features(
+                    df_tx_list_proc, is_train=False
+                )
+                X_enc_arr = np.hstack([test_embeddings, raw_scaled])
+                emb_cols = [
+                    f"Embedding GRL {i + 1}" for i in range(test_embeddings.shape[1])
+                ]
+                vec_cols = (
+                    [
+                        c.split("__")[-1]
+                        for c in champion_model.hinsage.vectorizer.get_feature_names_out()
+                    ]
+                    if hasattr(
+                        champion_model.hinsage.vectorizer, "get_feature_names_out"
+                    )
+                    else [f"feat_{i}" for i in range(raw_scaled.shape[1])]
+                )
+                cols = emb_cols + vec_cols
+                X_enc_all = pd.DataFrame(
+                    X_enc_arr, columns=cols, index=df_tx_list_proc.index
+                )
+                features_groups["Embeddings Réseau Graphe (HinSAGE)"] = emb_cols
+                predictor = champion_model.classifier
+            else:
+                predictor = getattr(champion_model, "classifier", champion_model)
+                X_enc_all = X_all
+                cols = X_all.columns.tolist()
+
+            # Extraction de la ligne spécifique pour l'affichage des détails
+            tx_row = df_tx_list_proc.loc[[tx_id]]
+
             xpl = SmartExplainer(
                 model=predictor,
                 features_groups=features_groups,
@@ -475,7 +494,7 @@ if target_merchant:
 
             xpl.get_interaction_values = dummy_get_interaction_values
 
-            with st.spinner("Calcul de la contribution locale..."):
+            with st.spinner("Calcul de la contribution locale SHAP..."):
                 xpl.compile(x=X_enc_all, y_target=y_all)
                 fig_local = xpl.plot.local_plot(index=tx_id)
 

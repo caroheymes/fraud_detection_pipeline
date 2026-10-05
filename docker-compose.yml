@@ -257,6 +257,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: '5432'
       POSTGRES_DB: ${POSTGRES_DB:-fraud-detection}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
       PYTHONUNBUFFERED: '1'
       STREAMLIT_SERVER_ENABLE_CORS: "false"
       STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: "false"

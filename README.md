@@ -70,6 +70,90 @@ La boucle automatique d'Airflow effectue quotidiennement les tâches suivantes :
 2. **Réentraînement** : Si la dérive des données est supérieure au seuil Evidently, `src/training/train.py` est lancé sur le cluster Ray.
 3. **Mise à jour** : Le modèle est versionné dans MLflow, sauvegardé sur disque et automatiquement rechargé par FastAPI.
 
+## ⚖️ Gouvernance MLOps & Règles de Promotion (`@champion`)
+
+Le cycle de vie et le déploiement des modèles s'appuient sur une gouvernance stricte de type **Champion vs Challenger** via le [MLflow Model Registry](https://mlflow.org/) et la classe centrale [`MLflowQualityGate`](src/utils/mlflow_manager.py) :
+
+```
+                 ┌─────────────────────────────────────────┐
+                 │    Nouvel Entraînement / Réentraînement │
+                 │   (XGBoost, GNN HinSAGE, etc.)          │
+                 └───────────────────┬─────────────────────┘
+                                     │
+                                     ▼
+                 ┌─────────────────────────────────────────┐
+                 │ Calibration du Seuil τ sur Validation   │
+                 │ & Évaluation Complète sur Test Set      │
+                 └───────────────────┬─────────────────────┘
+                                     │
+                                     ▼
+                 ┌─────────────────────────────────────────┐
+                 │         Quality Gate MLOps              │
+                 │  Score_Candidat > Score_Champion ?      │
+                 └──────────────┬──────────────────┬───────┘
+                     OUI        │                  │ NON
+            ┌───────────────────┘                  └───────────────────┐
+            ▼                                                          ▼
+┌───────────────────────────────────────┐            ┌───────────────────────────────────┐
+│ 👑 Promotion Automatique              │            │ 🥊 Challenger Conservé            │
+│ • Alias '@champion' réassigné         │            │ • Version loggée dans MLflow      │
+│ • Signal Hot-Reload vers FastAPI      │            │ • Modèle Champion actuel conservé │
+└───────────────────────────────────────┘            └───────────────────────────────────┘
+```
+
+### 1. Métriques Cibles d'Évaluation
+Lors de l'optimisation bayésienne (Optuna) ou de l'entraînement final, la métrique cible peut être spécifiée via l'argument `--metric-target` :
+* **`f2` (Défaut pour la fraude)** : Privilégie le rappel ($\beta=2.0$) pour minimiser les faux négatifs (fraudes manquées) tout en maintenant une précision acceptable.
+* **`f1`** : Moyenne harmonique équilibrée entre précision et rappel.
+* **`auprc` / `pr_auc`** : Aire sous la courbe Précision-Rappel (*Area Under Precision-Recall Curve*), métrique de référence pour les jeux de données déséquilibrés.
+* **`roc_auc`**, **`recall`**, **`precision`**.
+
+### 2. Évaluation Comparative Side-by-Side
+Pour garantir une comparaison équitable :
+1. Le modèle candidat est testé sur le jeu de test holdout récent.
+2. Si le Champion actuel est disponible, il est évalué **sur le même jeu de test** (*Side-by-Side comparison*).
+3. Si le candidat surpasse le score du champion actuel sur la métrique cible :
+   * L'alias **`@champion`** lui est automatiquement attribué dans MLflow.
+   * L'API FastAPI reçoit un signal d'auto-reload pour charger immédiatement la nouvelle version sans interruption de service.
+4. Dans le cas contraire, le modèle est enregistré comme **Challenger** et le Champion en production reste inchangé.
+
+### 3. Gestion manuelle et Rollback CLI
+La gouvernance permet également d'inspecter et de rétrograder/promouvoir manuellement n'importe quelle version :
+```bash
+# Inspection de l'état du registre et du champion actif
+python src/utils/mlflow_manager.py
+
+# Promotion / Rollback manuel vers une version spécifique (ex: version 3)
+python src/utils/mlflow_manager.py --set-version 3
+```
+
+---
+
+## 🎯 Calibration Dynamique des Seuils & Inférence Probabiliste (`predict_proba`)
+
+En détection de fraude bancaire (déséquilibre sévère, ~0.4% de fraude), un seuil de décision arbitraire (ex: 0.50 ou 0.15 codé en dur) dégrade considérablement les performances opérationnelles. Le projet intègre un module de **Threshold Tuning** universel ([`src/utils/threshold.py`](src/utils/threshold.py)).
+
+### 1. Optimisation du Seuil de Décision ($\tau$)
+À la fin de chaque entraînement :
+1. Le modèle calcule les probabilités d'appartenance à la classe positive : $\hat{p} = P(\text{fraude} \mid X) \in [0, 1]$ via `predict_proba`.
+2. La fonction `find_optimal_threshold()` balaie la courbe Précision-Rappel pour localiser le seuil $\tau^* \in [0.05, 0.95]$ maximisant la métrique choisie ($F_2$, $F_1$, $F_\beta$ ou matrice de coût).
+3. La fonction `evaluate_predictions_and_curves()` calcule à la fois :
+   * Les métriques intrinsèques au modèle (AUPRC, ROC-AUC).
+   * Les métriques opérationnelles appliquées au seuil optimal $\tau^*$ (Précision, Rappel, F1, F2, Matrice de confusion).
+
+### 2. Traçabilité & Persistance dans MLflow
+* Le seuil calibré $\tau^*$ est tracé dans les **paramètres** et **métriques** de l'expérience MLflow (`decision_threshold`).
+* Il est stocké de manière intrinsèque avec les métadonnées de la version du modèle.
+
+### 3. Inférence Temps Réel & Dynamic Serving (FastAPI)
+* L'API ([`src/api/main.py`](src/api/main.py)) utilise la fonction agnostique `load_champion_model()` pour charger simultanément :
+  1. Le pipeline de transformation et le modèle ML (`@champion`).
+  2. L'identifiant de version MLflow (ex: `fraud_detector_v12`).
+  3. Le **seuil de décision optimal calibré** $\tau^*$ associé.
+* Lors d'une requête d'inférence `/predict_batch` :
+  $$\text{Prédiction} = \begin{cases} 1 \text{ (Fraude)} & \text{si } P(\text{fraude} \mid X) \ge \tau^* \\ 0 \text{ (Légitime)} & \text{sinon} \end{cases}$$
+* Les endpoints `/model-info` et `/metrics` exposent dynamiquement la version active et la valeur de $\tau^*$ en production.
+
 ## 🛡️ Conformité réglementaire & Sécurité (RGPD, AI Act, PCI-DSS)
 
 Notre pipeline intègre les contraintes de sécurité et de conformité réglementaires par design :

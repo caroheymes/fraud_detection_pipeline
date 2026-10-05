@@ -9,6 +9,13 @@ import sys
 from datetime import timedelta
 
 import pandas as pd
+from sqlalchemy import text
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from src.utils.db import get_postgres_engine
 
 
 def main():
@@ -35,6 +42,12 @@ def main():
         default=30,
         help="Nombre d'étapes/fichiers à générer (défaut: 30)",
     )
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        help="Date de début forcée (format: 'YYYY-MM-DD HH:MM:SS'). Par défaut: MAX(trans_date_trans_time) dans PostgreSQL.",
+    )
     args = parser.parse_args()
 
     print(
@@ -58,38 +71,66 @@ def main():
     df["trans_date_trans_time"] = pd.to_datetime(df["trans_date_trans_time"])
 
     # 3. Détermination dynamique de la date de début (date max dans PostgreSQL)
-    db_user = os.getenv("POSTGRES_USER", "fraud-detection")
-    db_password = os.getenv("POSTGRES_PASSWORD", "fraud-detection_password")
-    db_host = os.getenv("POSTGRES_HOST", "postgres")
-    db_port = os.getenv("POSTGRES_PORT", "5432")
-    db_db = os.getenv("POSTGRES_DB", "fraud-detection")
-    db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_db}"
-
     start_date = None
-    try:
-        import sqlalchemy
 
-        engine = sqlalchemy.create_engine(db_url)
-        with engine.connect() as conn:
-            max_date_val = conn.execute(
-                sqlalchemy.text("SELECT MAX(trans_date_trans_time) FROM silver.rawdata")
-            ).scalar()
-            if max_date_val:
-                t = pd.to_datetime(max_date_val)
-                if t.tzinfo is not None:
-                    t = t.tz_localize(None)
-                start_date = t
-                print(
-                    f"[Simulation MLOps] Date max détectée dans Postgres : {start_date}"
-                )
-    except Exception as e:
-        print(
-            f"[Simulation MLOps] Impossible de lire la date max Postgres, repli sur le défaut : {e}"
-        )
+    if args.start_date:
+        try:
+            start_date = pd.to_datetime(args.start_date)
+            print(
+                f"[Simulation MLOps] Date de début spécifiée par argument CLI : {start_date}"
+            )
+        except Exception as e:
+            print(
+                f"[Simulation MLOps] Format de date invalide pour --start-date ({args.start_date}) : {e}"
+            )
+
+    if start_date is None:
+        try:
+            engine = get_postgres_engine()
+            with engine.connect() as conn:
+                max_date_val = conn.execute(
+                    text("SELECT MAX(trans_date_trans_time) FROM silver.rawdata")
+                ).scalar()
+                if max_date_val:
+                    t = pd.to_datetime(max_date_val)
+                    if t.tzinfo is not None:
+                        t = t.tz_localize(None)
+                    start_date = t
+                    print(
+                        f"[Simulation MLOps] ✅ Date MAX détectée dans PostgreSQL : {start_date}"
+                    )
+        except Exception as e:
+            print(f"[Simulation MLOps] Connexion PostgreSQL non disponible ({e}).")
 
     if start_date is None:
         start_date = df["trans_date_trans_time"].min() + timedelta(days=30)
-        print(f"[Simulation MLOps] Date de début par défaut : {start_date}")
+        print(f"[Simulation MLOps] ⚠️ Repli sur la date par défaut : {start_date}")
+
+    # 3.5 Vérifier si des fichiers sont déjà en attente dans la queue (pour accumuler sans écraser)
+    max_queue_date = None
+    try:
+        with os.scandir(queue_dir) as it:
+            for entry in it:
+                if entry.is_file() and entry.name.endswith(".csv"):
+                    # Nom standard: step_XX_YYYY-MM-DD_HH-MM.csv
+                    parts = entry.name.replace(".csv", "").split("_")
+                    if len(parts) >= 4:
+                        dt_str = f"{parts[2]} {parts[3].replace('-', ':')}:00"
+                        try:
+                            file_dt = pd.to_datetime(dt_str)
+                            if max_queue_date is None or file_dt > max_queue_date:
+                                max_queue_date = file_dt
+                        except Exception:
+                            pass
+    except Exception as q_err:
+        print(f"[Simulation MLOps] Erreur lecture queue : {q_err}")
+
+    if max_queue_date is not None:
+        if max_queue_date > start_date:
+            print(
+                f"[Simulation MLOps] 📁 Fichiers en attente dans la queue : décalage du début au {max_queue_date} pour accumuler."
+            )
+            start_date = max_queue_date
 
     # Calcul de l'intervalle temporel pour découper exactement en args.steps étapes
     if args.duration_unit == "days":
@@ -110,11 +151,17 @@ def main():
         bin_start = start_date + i * interval_delta
         bin_end = bin_start + interval_delta
 
-        # Filtrage
-        df_bin = df[
-            (df["trans_date_trans_time"] >= bin_start)
-            & (df["trans_date_trans_time"] < bin_end)
-        ].copy()
+        # Filtrage sans doublons avec l'instant initial
+        if i == 0:
+            df_bin = df[
+                (df["trans_date_trans_time"] > bin_start)
+                & (df["trans_date_trans_time"] <= bin_end)
+            ].copy()
+        else:
+            df_bin = df[
+                (df["trans_date_trans_time"] > bin_start)
+                & (df["trans_date_trans_time"] <= bin_end)
+            ].copy()
 
         # Construction du nom de fichier
         formatted_start = bin_start.strftime("%Y-%m-%d_%H-%M")

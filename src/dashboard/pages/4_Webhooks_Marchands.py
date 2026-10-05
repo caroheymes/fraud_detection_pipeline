@@ -1,11 +1,16 @@
-# src/dashboard/pages/4_Webhooks_Marchands.py
-
 import json
 import os
+import sys
 
 import pandas as pd
 import redis
 import streamlit as st
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from src.utils.db import get_postgres_engine
 
 st.set_page_config(
     page_title="Webhooks Marchands (Live)", page_icon="🔔", layout="wide"
@@ -52,18 +57,10 @@ st.markdown("---")
 
 
 def query_db(query):
-    import psycopg2
-
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("POSTGRES_HOST", "postgres"),
-            database=os.getenv("POSTGRES_DB", "fraud-detection"),
-            user=os.getenv("POSTGRES_USER", "fraud-detection"),
-            password=os.getenv("POSTGRES_PASSWORD", "fraud-detection_password"),
-            port=os.getenv("POSTGRES_PORT", "5432"),
-        )
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        engine = get_postgres_engine()
+        with engine.connect() as conn:
+            df = pd.read_sql_query(query, conn)
         return df, None
     except Exception as e:
         return None, str(e)

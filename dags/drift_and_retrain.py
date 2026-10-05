@@ -8,23 +8,35 @@ from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator, PythonOperator
 
 
-def check_drift_evidently(**context):
-    """Exécute le script detect_drift.py dans ray-head avec la date courante"""
-    print("Context keys:", list(context.keys()))
-    logical_date = (
-        context.get("logical_date") or context.get("dag_run").logical_date
-        if context.get("dag_run")
-        else None
+def refresh_gold_marts_dbt():
+    """Tâche Airflow — Exécution de dbt run pour rafraîchir les tables Gold avant l'audit de drift"""
+    import os
+
+    print("Exécution de dbt run pour mettre à jour les tables Gold...")
+    env = os.environ.copy()
+    env["POSTGRES_HOST"] = os.getenv("POSTGRES_HOST", "postgres")
+    env["POSTGRES_PORT"] = os.getenv("POSTGRES_PORT", "5432")
+    res = subprocess.run(
+        ["dbt", "run", "--profiles-dir", "."],
+        cwd="/opt/airflow/project/dbt_project",
+        env=env,
+        capture_output=True,
+        text=True,
     )
-    if logical_date:
-        if hasattr(logical_date, "strftime"):
-            ds = logical_date.strftime("%Y-%m-%d")
-        else:
-            ds = str(logical_date)[:10]
-    else:
-        ds = datetime.now().strftime("%Y-%m-%d")
-    print(f"Using date for drift test: {ds}")
-    cmd = f"docker exec -t fraud-detection-ray-head python src/training/detect_drift.py --current-date {ds}"
+    print(res.stdout)
+    if res.returncode != 0:
+        print(f"Erreur dbt run : {res.stderr}")
+        raise RuntimeError(f"Échec de dbt run : {res.stderr}")
+    print("✅ Tables Gold (SLA, marchands, etc.) rafraîchies avec succès par dbt !")
+
+
+def check_drift_evidently(**context):
+    """Exécute le script detect_drift.py dans ray-head avec la date simulée courante"""
+    cmd = (
+        "docker exec -t fraud-detection-ray-head python src/training/detect_drift.py "
+        "--current-days 7 --ref-days-start 38 --ref-days-end 8 "
+        "--min-f2 0.50 --min-recall 0.50 --min-precision 0.20 --min-f1 0.50"
+    )
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     print(res.stdout)
     print(res.stderr)
@@ -32,14 +44,14 @@ def check_drift_evidently(**context):
 
 
 def trigger_hpo_and_retrain():
-    """Exécute l'optimisation XGBoost, le réentraînement et la promotion sur Ray/MLflow"""
-    cmd = "docker exec -t fraud-detection-ray-head python src/training/optimize_xgb.py --n-trials 100 --sample-size -1"
+    """Exécute le pipeline de réentraînement dynamique selon l'architecture du Champion actif dans MLflow"""
+    cmd = "docker exec -t fraud-detection-ray-head python src/training/retrain_champion.py"
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:
         raise RuntimeError(
-            f"Échec de l'optimisation/réentraînement XGBoost : {res.stderr}"
+            f"Échec de l'optimisation/réentraînement du modèle : {res.stderr}"
         )
 
 
@@ -64,10 +76,15 @@ default_args = {
 with DAG(
     "drift_and_retrain_loop",
     default_args=default_args,
-    description="Vérification quotidienne du drift et réentraînement HPO si nécessaire",
-    schedule="0 2 * * *",  # Se déclenche tous les jours à 2 heures du matin
+    description="Vérification périodique du drift/perfs et réentraînement HPO si nécessaire",
+    schedule="*/30 * * * *",  # Toutes les 30 minutes
     catchup=False,
 ) as dag:
+    dbt_task = PythonOperator(
+        task_id="refresh_gold_marts_dbt",
+        python_callable=refresh_gold_marts_dbt,
+    )
+
     audit_task = BranchPythonOperator(
         task_id="audit_drift",
         python_callable=check_drift_evidently,
@@ -88,5 +105,6 @@ with DAG(
         trigger_rule="none_failed_min_one_success",  # S'exécute si train_task ou skip_task réussit sans erreur
     )
 
+    dbt_task >> audit_task
     audit_task >> [train_task, skip_task]
     [train_task, skip_task] >> export_rules_task

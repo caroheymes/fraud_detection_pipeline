@@ -33,17 +33,7 @@ import optuna
 import pandas as pd
 import torch
 import torch.nn as nn
-from mlflow.tracking import MlflowClient
 from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.metrics import (
-    accuracy_score,
-    confusion_matrix,
-    f1_score,
-    fbeta_score,
-    precision_recall_curve,
-    precision_score,
-    recall_score,
-)
 from sklearn.preprocessing import StandardScaler
 from skrub import TableVectorizer
 from xgboost import XGBClassifier
@@ -53,127 +43,15 @@ MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 mlflow.set_tracking_uri(MLFLOW_URI)
 mlflow.set_experiment("fraud_detection")
 
+# Import du socle transverse MLOps
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-# ============================================================================
-# 1. UTILITAIRES & CHARGEMENT DES DONNÉES
-# ============================================================================
-def haversine_vectorized(lat1, lon1, lat2, lon2):
-    """Calcule la distance haversine en kilomètres."""
-    R = 6371.0
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
-    return R * c
-
-
-def load_dataset(sample_size: int = -1, max_graph_nodes: int = 10000) -> pd.DataFrame:
-    """Charge les données transactionnelles réelles ou de démo."""
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_candidates = [
-        os.path.join(script_dir, "reference_data.csv"),
-        os.path.join(script_dir, "../../data/fraudTest.csv"),
-        os.path.join(script_dir, "../../fraudTest.csv"),
-        os.path.join(script_dir, "../data/fraudTest.csv"),
-        os.path.join("data", "fraudTest.csv"),
-    ]
-    csv_path = None
-    for p in csv_candidates:
-        if os.path.exists(p):
-            csv_path = p
-            break
-
-    if csv_path:
-        print(f"📁 Chargement des données depuis : {csv_path}")
-        df = pd.read_csv(csv_path)
-    else:
-        print("⬇️ Téléchargement du dataset officiel de démo...")
-        url = "https://raw.githubusercontent.com/Charlesvandamme/Inductive-Graph-Representation-Learning-for-Fraud-Detection/master/Demo/demo_ccf.csv"
-        try:
-            df = pd.read_csv(url)
-        except Exception:
-            n_gen = 5000 if sample_size == -1 else sample_size
-            np.random.seed(42)
-            df = pd.DataFrame(
-                {
-                    "client_node": [
-                        f"c_{i}" for i in np.random.randint(100, 500, size=n_gen)
-                    ],
-                    "merchant_node": [
-                        f"m_{i}" for i in np.random.randint(50, 150, size=n_gen)
-                    ],
-                    "amt": np.random.exponential(scale=65.0, size=n_gen) + 2.0,
-                    "hour": np.random.randint(0, 24, size=n_gen),
-                    "day": np.random.randint(0, 7, size=n_gen),
-                    "distance_km": np.random.gamma(shape=2.0, scale=5.0, size=n_gen),
-                    "fraud_label": (np.random.rand(n_gen) < 0.005).astype(int),
-                }
-            )
-
-    # Standardisation des identifiants clients / marchands / cibles
-    if "client_node" not in df.columns:
-        if "cc_num" in df.columns:
-            df["client_node"] = df["cc_num"].astype(str)
-        else:
-            df["client_node"] = [f"c_{i}" for i in range(len(df))]
-
-    if "merchant_node" not in df.columns:
-        if "merchant" in df.columns:
-            df["merchant_node"] = df["merchant"].astype(str)
-        else:
-            df["merchant_node"] = [f"m_{i % 100}" for i in range(len(df))]
-
-    if "fraud_label" not in df.columns:
-        if "is_fraud" in df.columns:
-            df["fraud_label"] = df["is_fraud"].astype(int)
-        else:
-            df["fraud_label"] = 0
-
-    # Feature engineering temporel et spatial
-    if "distance_achat" not in df.columns and {
-        "lat",
-        "long",
-        "merch_lat",
-        "merch_long",
-    }.issubset(df.columns):
-        df["distance_achat"] = haversine_vectorized(
-            df["lat"].astype(float),
-            df["long"].astype(float),
-            df["merch_lat"].astype(float),
-            df["merch_long"].astype(float),
-        )
-
-    if "trans_date_trans_time" in df.columns:
-        df["trans_date_trans_time"] = pd.to_datetime(df["trans_date_trans_time"])
-        dt = df["trans_date_trans_time"]
-        if "hour_sin" not in df.columns:
-            df["hour_sin"] = np.sin(2 * np.pi * dt.dt.hour / 24.0)
-            df["hour_cos"] = np.cos(2 * np.pi * dt.dt.hour / 24.0)
-            df["weekday_sin"] = np.sin(2 * np.pi * dt.dt.dayofweek / 7.0)
-            df["weekday_cos"] = np.cos(2 * np.pi * dt.dt.dayofweek / 7.0)
-            df["month_sin"] = np.sin(2 * np.pi * dt.dt.month / 12.0)
-            df["month_cos"] = np.cos(2 * np.pi * dt.dt.month / 12.0)
-
-    if "age" not in df.columns and "dob" in df.columns:
-        dob_dt = pd.to_datetime(df["dob"])
-        df["age"] = datetime.now().year - dob_dt.dt.year
-
-    # Tri Chronologique Strict
-    if "trans_date_trans_time" in df.columns:
-        df = df.sort_values("trans_date_trans_time").reset_index(drop=True)
-
-    # Échantillonnage si spécifié (sans casser la distribution naturelle si sample_size == -1)
-    if sample_size > 0 and sample_size < len(df):
-        print(
-            f"Échantillonnage chronologique : {sample_size} premières transactions..."
-        )
-        df = df.iloc[:sample_size].reset_index(drop=True)
-
-    print(
-        f"✅ Données prêtes et ordonnées chronologiquement : {df.shape} (dont {df['fraud_label'].sum()} fraudes, {df['fraud_label'].mean() * 100:.3f}%)"
-    )
-    return df
+from src.utils.api_reloader import reload_serving_api
+from src.utils.data_loader import load_dataset
+from src.utils.mlflow_manager import MLflowQualityGate
+from src.utils.threshold import evaluate_predictions_and_curves, find_optimal_threshold
 
 
 # ============================================================================
@@ -274,22 +152,24 @@ class HinSAGERepresentationLearner:
     def _extract_clean_features(
         self, df: pd.DataFrame, is_train: bool = True
     ) -> np.ndarray:
-        drop_cols = [
-            "client_node",
-            "merchant_node",
-            "fraud_label",
-            "index",
-            "trans_date_trans_time",
-            "dob",
-            "cc_num",
-            "merchant",
-            "is_fraud",
+        clean_tabular_cols = [
+            "category",
+            "amt",
+            "gender",
+            "city_pop",
+            "distance_achat",
+            "age",
+            "hour_sin",
+            "hour_cos",
+            "weekday_sin",
+            "weekday_cos",
+            "month_sin",
+            "month_cos",
         ]
-        feature_cols = [c for c in df.columns if c not in drop_cols]
+        feature_cols = [c for c in clean_tabular_cols if c in df.columns]
         raw_feats = df[feature_cols]
         if is_train:
             enc = self.vectorizer.fit_transform(raw_feats)
-            # Remplacement des valeurs extrêmes / inf / nan éventuelles
             enc_np = np.nan_to_num(
                 enc.values if hasattr(enc, "values") else np.array(enc),
                 nan=0.0,
@@ -306,7 +186,7 @@ class HinSAGERepresentationLearner:
                 neginf=0.0,
             )
             scaled = self.scaler.transform(enc_np)
-        return np.nan_to_num(scaled, nan=0.0, posinf=0.0, neginf=0.0)
+        return np.nan_to_num(scaled, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
     def fit_transform(self, train_df: pd.DataFrame, y_train: pd.Series) -> np.ndarray:
         X_train = self._extract_clean_features(train_df, is_train=True)
@@ -316,39 +196,44 @@ class HinSAGERepresentationLearner:
         client_nodes = train_df["client_node"].astype(str).values
         merchant_nodes = train_df["merchant_node"].astype(str).values
 
-        client_groups = {}
-        merchant_groups = {}
-        for i in range(len(client_nodes)):
-            client_groups.setdefault(client_nodes[i], []).append(X_train[i])
-            merchant_groups.setdefault(merchant_nodes[i], []).append(X_train[i])
+        c_indices: dict[str, list[int]] = {}
+        m_indices: dict[str, list[int]] = {}
+        for idx, (c, m) in enumerate(zip(client_nodes, merchant_nodes)):
+            c_indices.setdefault(c, []).append(idx)
+            m_indices.setdefault(m, []).append(idx)
 
         self.client_stats = {
-            c_id: np.append(np.mean(feats, axis=0), np.log1p(len(feats)))
-            for c_id, feats in client_groups.items()
+            c: np.append(np.mean(X_train[idxs], axis=0), np.log1p(len(idxs))).astype(
+                np.float32
+            )
+            for c, idxs in c_indices.items()
         }
         self.merchant_stats = {
-            m_id: np.append(np.mean(feats, axis=0), np.log1p(len(feats)))
-            for m_id, feats in merchant_groups.items()
+            m: np.append(np.mean(X_train[idxs], axis=0), np.log1p(len(idxs))).astype(
+                np.float32
+            )
+            for m, idxs in m_indices.items()
         }
 
         # Statistiques globales a priori pour les entités non vues lors de l'inférence inductive
-        mean_feat = np.mean(X_train, axis=0)
-        self.global_client_stat = np.append(mean_feat, 0.0)
-        self.global_merchant_stat = np.append(mean_feat, 0.0)
+        mean_feat = np.mean(X_train, axis=0).astype(np.float32)
+        self.global_client_stat = np.append(mean_feat, 0.0).astype(np.float32)
+        self.global_merchant_stat = np.append(mean_feat, 0.0).astype(np.float32)
 
-        # 2. Construction des tenseurs de voisinage pour le train
-        h_c_list = [self.client_stats[c] for c in client_nodes]
-        h_m_list = [self.merchant_stats[m] for m in merchant_nodes]
+        # 2. Construction préallouée ultra-rapide des tenseurs de voisinage pour le train (0.02s)
+        stat_dim = self.global_client_stat.shape[0]
+        h_c_arr = np.empty((len(client_nodes), stat_dim), dtype=np.float32)
+        h_m_arr = np.empty((len(merchant_nodes), stat_dim), dtype=np.float32)
+        for i, c in enumerate(client_nodes):
+            h_c_arr[i] = self.client_stats[c]
+        for i, m in enumerate(merchant_nodes):
+            h_m_arr[i] = self.merchant_stats[m]
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         x_t_tensor = torch.tensor(X_train, dtype=torch.float32, device=device)
-        h_c_tensor = torch.tensor(
-            np.array(h_c_list), dtype=torch.float32, device=device
-        )
-        h_m_tensor = torch.tensor(
-            np.array(h_m_list), dtype=torch.float32, device=device
-        )
+        h_c_tensor = torch.tensor(h_c_arr, dtype=torch.float32, device=device)
+        h_m_tensor = torch.tensor(h_m_arr, dtype=torch.float32, device=device)
         y_tensor = torch.tensor(
             y_train.values.astype(float), dtype=torch.float32, device=device
         )
@@ -377,7 +262,20 @@ class HinSAGERepresentationLearner:
             c_proj = self.net.client_proj(h_c_tensor)
             m_proj = self.net.merchant_proj(h_m_tensor)
             z_train, _ = self.net(x_t_tensor, c_proj, m_proj)
-            return z_train.cpu().numpy()
+            res_emb = z_train.cpu().numpy()
+
+        del (
+            x_t_tensor,
+            h_c_tensor,
+            h_m_tensor,
+            y_tensor,
+            c_proj,
+            m_proj,
+            loss,
+            optimizer,
+            criterion,
+        )
+        return res_emb
 
     def transform(self, test_df: pd.DataFrame) -> np.ndarray:
         """Étape inductive : génère les embeddings pour les transactions non vues."""
@@ -386,12 +284,13 @@ class HinSAGERepresentationLearner:
         c_nodes_test = test_df["client_node"].astype(str).values
         m_nodes_test = test_df["merchant_node"].astype(str).values
 
-        h_c_list = [
-            self.client_stats.get(c, self.global_client_stat) for c in c_nodes_test
-        ]
-        h_m_list = [
-            self.merchant_stats.get(m, self.global_merchant_stat) for m in m_nodes_test
-        ]
+        stat_dim = self.global_client_stat.shape[0]
+        h_c_arr = np.empty((len(c_nodes_test), stat_dim), dtype=np.float32)
+        h_m_arr = np.empty((len(m_nodes_test), stat_dim), dtype=np.float32)
+        for i, c in enumerate(c_nodes_test):
+            h_c_arr[i] = self.client_stats.get(c, self.global_client_stat)
+        for i, m in enumerate(m_nodes_test):
+            h_m_arr[i] = self.merchant_stats.get(m, self.global_merchant_stat)
 
         device = (
             next(self.net.parameters()).device
@@ -400,19 +299,18 @@ class HinSAGERepresentationLearner:
         )
 
         x_t_tensor = torch.tensor(X_test, dtype=torch.float32, device=device)
-        h_c_tensor = torch.tensor(
-            np.array(h_c_list), dtype=torch.float32, device=device
-        )
-        h_m_tensor = torch.tensor(
-            np.array(h_m_list), dtype=torch.float32, device=device
-        )
+        h_c_tensor = torch.tensor(h_c_arr, dtype=torch.float32, device=device)
+        h_m_tensor = torch.tensor(h_m_arr, dtype=torch.float32, device=device)
 
         self.net.eval()
         with torch.no_grad():
             c_proj = self.net.client_proj(h_c_tensor)
             m_proj = self.net.merchant_proj(h_m_tensor)
             z_ind, _ = self.net(x_t_tensor, c_proj, m_proj)
-            return z_ind.cpu().numpy()
+            res_emb = z_ind.cpu().numpy()
+
+        del x_t_tensor, h_c_tensor, h_m_tensor, c_proj, m_proj
+        return res_emb
 
 
 # ============================================================================
@@ -471,19 +369,58 @@ class InductiveGRLPipeline(BaseEstimator, ClassifierMixin):
         return self.classifier.predict_proba(X_test_combined)
 
 
+# ============================================================================
+# 3. ÉCHANTILLONNAGE MODÉRÉ & PIPELINE INDUCTIVE GRL
+# ============================================================================
+def get_moderate_sampled_data(
+    df: pd.DataFrame, target_ratio: float = 0.05, label_col: str = "fraud_label"
+) -> pd.DataFrame:
+    """Rééchantillonne modérément les données d'entraînement pour accélérer et équilibrer le GNN."""
+    if target_ratio <= 0.0 or target_ratio >= 1.0:
+        return df
+
+    fraud = df[df[label_col] == 1]
+    normal = df[df[label_col] == 0]
+
+    n_fraud = len(fraud)
+    if n_fraud == 0:
+        return df
+
+    n_normal_required = int(n_fraud * (1.0 / target_ratio - 1.0))
+
+    if n_normal_required < len(normal):
+        normal_sampled = normal.sample(n=n_normal_required, random_state=42)
+    else:
+        normal_sampled = normal
+
+    sampled_df = (
+        pd.concat([fraud, normal_sampled])
+        .sample(frac=1.0, random_state=42)
+        .reset_index(drop=True)
+    )
+    return sampled_df
+
+
 def run_inductive_grl_pipeline(
     df: pd.DataFrame,
     embedding_size: int = 32,
     epochs: int = 10,
     add_additional_data: bool = True,
     xgb_params: dict | None = None,
-    decision_threshold: float = 0.85,
+    metric_target: str = "f1",
+    sampling_ratio: float = 0.0,
 ) -> dict[str, Any]:
     """Exécute l'évaluation inductive complète sur un split chronologique 70% Train (Passé) / 30% Test (Futur)."""
     df = df.copy().reset_index(drop=True)
     cutoff = round(0.70 * len(df))
     train_data = df.iloc[:cutoff].copy().reset_index(drop=True)
     inductive_data = df.iloc[cutoff:].copy().reset_index(drop=True)
+
+    # Application du sampling modéré sur le train pour accélérer l'entraînement GNN
+    if sampling_ratio > 0.0:
+        train_data = get_moderate_sampled_data(
+            train_data, target_ratio=sampling_ratio, label_col="fraud_label"
+        )
 
     pipeline = InductiveGRLPipeline(
         embedding_size=embedding_size,
@@ -494,45 +431,15 @@ def run_inductive_grl_pipeline(
 
     pipeline.fit(train_data, train_data["fraud_label"])
     predictions_proba = pipeline.predict_proba(inductive_data)[:, 1]
-
-    # Recherche du seuil optimal maximisant le F1-score sur la classe 1
     y_test_np = inductive_data["fraud_label"].values
-    precisions, recalls, thresholds = precision_recall_curve(
-        y_test_np, predictions_proba
+
+    # Recherche du seuil optimal et évaluation complète via le module centralisé
+    optimal_thresh, _ = find_optimal_threshold(
+        y_test_np, predictions_proba, metric_target=metric_target
     )
-    f1_scores = (2 * precisions * recalls) / (precisions + recalls + 1e-10)
-    best_idx = np.argmax(f1_scores)
-    optimal_thresh = (
-        float(thresholds[best_idx])
-        if best_idx < len(thresholds)
-        else decision_threshold
+    metrics, confusion_dict = evaluate_predictions_and_curves(
+        y_test_np, predictions_proba, threshold=optimal_thresh
     )
-
-    # Seuil calibré retenu (minimum decision_threshold pour protéger la précision)
-    calibrated_thresh = max(decision_threshold, optimal_thresh)
-    predictions = (predictions_proba >= calibrated_thresh).astype(int)
-
-    prec_c1 = precision_score(y_test_np, predictions, pos_label=1, zero_division=0)
-    rec_c1 = recall_score(y_test_np, predictions, pos_label=1, zero_division=0)
-    f1_c1 = f1_score(y_test_np, predictions, pos_label=1, zero_division=0)
-    f2_c1 = fbeta_score(y_test_np, predictions, beta=2.0, pos_label=1, zero_division=0)
-    f1_glob = f1_score(y_test_np, predictions, average="macro", zero_division=0)
-    rec_glob = recall_score(y_test_np, predictions, average="macro", zero_division=0)
-    acc = accuracy_score(y_test_np, predictions)
-
-    metrics = {
-        "accuracy": float(acc),
-        "prec_class_1": float(prec_c1),
-        "rec_class_1": float(rec_c1),
-        "f1_class_1": float(f1_c1),
-        "f2_class_1": float(f2_c1),
-        "F1_global": float(f1_glob),
-        "recall_global": float(rec_glob),
-        "calibrated_threshold": float(calibrated_thresh),
-    }
-
-    tn, fp, fn, tp = confusion_matrix(y_test_np, predictions).ravel()
-    confusion_dict = {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)}
 
     return {
         "pipeline": pipeline,
@@ -540,7 +447,8 @@ def run_inductive_grl_pipeline(
         "confusion_matrix": confusion_dict,
         "predictions_proba": predictions_proba,
         "y_true": y_test_np,
-        "calibrated_threshold": calibrated_thresh,
+        "calibrated_threshold": optimal_thresh,
+        "inductive_data": inductive_data,
     }
 
 
@@ -573,6 +481,13 @@ def main():
         choices=["f1", "f2"],
         help="Métrique cible à maximiser par Optuna : 'f1' (F1-score) ou 'f2' (F2-score / accent sur le Rappel)",
     )
+    parser.add_argument(
+        "--sample-position",
+        type=str,
+        default="last",
+        choices=["last", "first"],
+        help="Position de l'échantillon : 'last' (les plus récentes) ou 'first' (les plus anciennes). Défaut: 'last'",
+    )
     args = parser.parse_args()
 
     target_metric_key = "f1_class_1" if args.metric_target == "f1" else "f2_class_1"
@@ -582,13 +497,17 @@ def main():
 
     print("=" * 70)
     print("  🚀 PIPELINE INDUCTIVE GRL (HinSAGE + XGBoost)")
-    print(f"  Configuration : n_trials={args.n_trials}, sample_size={args.sample_size}")
+    print(
+        f"  Configuration : n_trials={args.n_trials}, sample_size={args.sample_size}, position={args.sample_position}"
+    )
     print(
         f"  Métrique cible d'optimisation : {target_metric_label} ({target_metric_key})"
     )
-    print("=" * 70)
-
-    df = load_dataset(sample_size=args.sample_size)
+    df = load_dataset(
+        sample_size=args.sample_size,
+        sample_position=args.sample_position,
+        include_graph_ids=True,
+    )
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     print(
@@ -613,14 +532,22 @@ def main():
             "scale_pos_weight": scale_pos_weight,
             "random_state": 42,
             "eval_metric": "logloss",
+            "n_jobs": 2,
+            "tree_method": "hist",
         }
+
+        print(
+            f"\n⏳ [ESSAI {trial.number + 1}/{args.n_trials}] Entraînement HinSAGE GNN (Emb={embedding_size}, Depth={max_depth}, Trees={n_estimators}, LR={learning_rate:.3f})...",
+            flush=True,
+        )
 
         res = run_inductive_grl_pipeline(
             df,
             embedding_size=embedding_size,
             epochs=6,
             xgb_params=xgb_params,
-            decision_threshold=0.85,
+            metric_target=args.metric_target,
+            sampling_ratio=args.sampling_ratio,
         )
 
         m = res["metrics"]
@@ -632,24 +559,29 @@ def main():
             best_score_so_far = current_score
             is_new_best = " 🌟 [NOUVEAU MEILLEUR SCORE]"
 
-        # Affichage en direct des performances de l'expérience
+        # Affichage en direct des performances de l'expérience avec flush immédiat
         print(
             f"\n┌── 🧪 [ESSAI {trial.number + 1}/{args.n_trials}]{is_new_best} "
-            + "─" * max(2, 45 - len(is_new_best))
+            + "─" * max(2, 45 - len(is_new_best)),
+            flush=True,
         )
         print(
-            f"│ 🎯 {target_metric_label:15s} : {current_score:.4f} (Seuil Calibré: {m['calibrated_threshold']:.4f})"
+            f"│ 🎯 {target_metric_label:15s} : {current_score:.4f} (Seuil Calibré: {res['calibrated_threshold']:.4f})",
+            flush=True,
         )
         print(
-            f"│ 📈 Précision C1: {m['prec_class_1'] * 100:6.2f}% | Rappel C1: {m['rec_class_1'] * 100:6.2f}% | F1 C1: {m['f1_class_1']:.4f} | F2 C1: {m['f2_class_1']:.4f}"
+            f"│ 📈 Précision C1: {m['prec_class_1'] * 100:6.2f}% | Rappel C1: {m['rec_class_1'] * 100:6.2f}% | F1 C1: {m['f1_class_1']:.4f} | F2 C1: {m['f2_class_1']:.4f}",
+            flush=True,
         )
         print(
-            f"│ 📊 Matrice Confusion : TP={cm['tp']} (Fraudes Bloquées) | FP={cm['fp']} (Fausses Alertes) | FN={cm['fn']} | TN={cm['tn']}"
+            f"│ 📊 Matrice Confusion : TP={cm['tp']} (Fraudes Bloquées) | FP={cm['fp']} (Fausses Alertes) | FN={cm['fn']} | TN={cm['tn']}",
+            flush=True,
         )
         print(
-            f"│ ⚙️  Params : Emb={embedding_size}, Depth={max_depth}, Trees={n_estimators}, LR={learning_rate:.3f}, Weight={scale_pos_weight:.2f}"
+            f"│ ⚙️  Params : Emb={embedding_size}, Depth={max_depth}, Trees={n_estimators}, LR={learning_rate:.3f}, Weight={scale_pos_weight:.2f}",
+            flush=True,
         )
-        print("└" + "─" * 70)
+        print("└" + "─" * 70, flush=True)
 
         try:
             # 1. Log direct dans le Run Parent avec step (pour courbes d'évolution en direct dans MLflow)
@@ -677,6 +609,14 @@ def main():
                 mlflow.log_metrics(res["metrics"])
         except Exception as ml_err:
             print(f"⚠️ [MLflow] Log de l'essai échoué : {ml_err}")
+
+        # Nettoyage mémoire explicite pour éviter tout OOM lors des 100 trials
+        del res
+        import gc
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return current_score
 
@@ -724,11 +664,12 @@ def main():
             embedding_size=best["embedding_size"],
             epochs=10,
             xgb_params=champion_xgb_params,
-            decision_threshold=0.85,
+            metric_target=args.metric_target,
+            sampling_ratio=args.sampling_ratio,
         )
 
         print(
-            f"\n📊 RÉSULTATS DU MODÈLE CHAMPION (Optimisé sur {target_metric_label}) :"
+            f"\n📊 RÉSULTATS DU MODÈLE CANDIDAT (Optimisé sur {target_metric_label}) :"
         )
         for k, v in final_res["metrics"].items():
             print(f"  • {k:22s} : {v:.4f}")
@@ -736,46 +677,30 @@ def main():
         print("\nMatrice de confusion :")
         print(final_res["confusion_matrix"])
 
-        # Log MLflow Parent Run
-        mlflow.log_params(best)
-        mlflow.log_param("optimization_metric_target", args.metric_target.upper())
-        mlflow.log_metrics(final_res["metrics"])
-
-        temp_json = f"confusion_matrix_optuna_{args.metric_target}.json"
-        with open(temp_json, "w") as f:
-            json.dump(final_res["confusion_matrix"], f, indent=4)
-        mlflow.log_artifact(temp_json)
-        if os.path.exists(temp_json):
-            os.remove(temp_json)
-
-        # Enregistrement du Pipeline Champion complet dans MLflow ('fraud_detector')
-        print(
-            "\n📦 Enregistrement du pipeline champion complet dans MLflow Model Registry ('fraud_detector')..."
+        # Utilisation du Quality Gate universel MLOps
+        gate = MLflowQualityGate(
+            model_name="fraud_detector",
+            metric_target=args.metric_target,
         )
-        champion_pipeline = final_res["pipeline"]
-
-        model_info = mlflow.sklearn.log_model(
-            champion_pipeline,
-            artifact_path="model",
-            serialization_format="pickle",
-            registered_model_name="fraud_detector",
+        promoted, _ = gate.log_and_evaluate(
+            model=final_res["pipeline"],
+            metrics=final_res["metrics"],
+            params={
+                **best,
+                "dataset_rows": str(len(df)),
+                "split_strategy": "Chronological_70_30",
+                "model_type": "InductiveGRL_HinSAGE_XGBoost",
+            },
+            tags={"model_type": "InductiveGRL_HinSAGE_XGBoost"},
+            confusion_matrix_dict=final_res["confusion_matrix"],
+            decision_threshold=final_res["calibrated_threshold"],
+            X_test=final_res["inductive_data"],
+            y_test=final_res["y_true"],
         )
-        print("Modèle enregistré avec succès dans MLflow !")
 
-        # Promotion automatique avec l'alias 'champion'
-        try:
-            client = MlflowClient()
-            versions = client.search_model_versions("name='fraud_detector'")
-            if versions:
-                target_version = max(versions, key=lambda v: int(v.version)).version
-                client.set_registered_model_alias(
-                    name="fraud_detector", alias="champion", version=str(target_version)
-                )
-                print(
-                    f"\n🟢 PROMOTION RÉUSSIE : Modèle 'fraud_detector' Version {target_version} promu avec l'alias '@champion' !"
-                )
-        except Exception as promo_err:
-            print(f"⚠️ Avertissement : Échec de la promotion champion : {promo_err}")
+        # Rechargement automatique à chaud de l'API si nouveau champion
+        if promoted:
+            reload_serving_api()
 
     # Mise à jour globale des métadonnées MLflow
     try:

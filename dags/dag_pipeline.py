@@ -2,22 +2,29 @@
 # docker exec -t fraud-detection-ray-head python -m py_compile dags/dag_pipeline.py
 # docker logs fraud-detection-airflow-webserver mot de passe
 
-import glob
 import json
 import logging
 import os
+
+# import requests
+import sys
 from datetime import datetime, timedelta
 
 # import numpy as np
 # import pandas as pd
 import pytz
-
-# import requests
 from airflow import DAG
 from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+
+# Import du socle transverse de base de données
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from src.utils.db import get_postgres_engine
 
 # ============================================================================
 # LOGGING & CORE CONFIGURATION
@@ -27,15 +34,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_USER = os.getenv("POSTGRES_USER", "fraud-detection")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "fraud-detection_password")
-DB_HOST = os.getenv("POSTGRES_HOST", "postgres")
-DB_PORT = os.getenv("POSTGRES_PORT", "5432")
-DB_DB = os.getenv("POSTGRES_DB", "fraud-detection")
-
-DATABASE_URL = (
-    f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_DB}"
-)
 OUTPUT_DIR = "/opt/airflow/project/data"
 
 
@@ -44,21 +42,38 @@ OUTPUT_DIR = "/opt/airflow/project/data"
 # ============================================================================
 def ingest_data_from_queue(ti):
     """Tâche Airflow #1 — Ingestion temps réel des fichiers par lots dans ./data/queue"""
-    queue_files = glob.glob(os.path.join(OUTPUT_DIR, "queue", "*.csv"))
-    queue_files.sort()
-    if not queue_files:
-        raise FileNotFoundError(
-            "Le répertoire ./data/queue est vide. Aucune donnée à ingérer."
-        )
+    queue_dir = os.path.join(OUTPUT_DIR, "queue")
+    if not os.path.exists(queue_dir):
+        raise FileNotFoundError(f"Le répertoire {queue_dir} n'existe pas.")
 
-    # Prendre un lot (batch) de max 1 fichier pour traiter au fur et à mesure
-    batch_size = 1
-    batch_files = queue_files[:batch_size]
-    filenames = [os.path.basename(f) for f in batch_files]
+    batch_size = 100
+    filenames = []
+
+    with os.scandir(queue_dir) as it:
+        for entry in it:
+            if entry.is_file() and entry.name.endswith(".csv"):
+                try:
+                    if entry.stat().st_size == 0:
+                        os.remove(entry.path)
+                        continue
+                    filenames.append(entry.name)
+                    if len(filenames) >= batch_size:
+                        break
+                except Exception:
+                    pass
+
+    if not filenames:
+        logger.info(
+            "Le répertoire ./data/queue est vide. Aucun fichier à ingérer pour ce cycle."
+        )
+        batch_info_path = os.path.join(OUTPUT_DIR, "current_batch.json")
+        with open(batch_info_path, "w") as f:
+            json.dump([], f)
+        return
 
     # Connexion à PostgreSQL
     logger.info("Connecting to PostgreSQL container...")
-    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    engine = get_postgres_engine()
     try:
         timezone = pytz.timezone("Europe/Paris")
         fetched_at = datetime.now(timezone)
@@ -138,13 +153,26 @@ def trigger_batch_prediction(ti):
     for filename in filenames:
         file_path = os.path.join(OUTPUT_DIR, "queue", filename)
         if os.path.exists(file_path):
+            if os.path.getsize(file_path) == 0:
+                logger.warning(
+                    f"Fichier 0-octet ignoré lors de la prédiction : {filename}"
+                )
+                continue
             try:
                 # Lecture en string pour contourner le segfault de pandas sur cc_num à 19 chiffres
                 df = pd.read_csv(file_path, dtype=str)
+                if df.empty or len(df.columns) == 0:
+                    logger.warning(f"Fichier sans colonnes/données ignoré : {filename}")
+                    continue
                 for col in numeric_cols:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors="coerce")
                 dfs.append(df)
+            except pd.errors.EmptyDataError:
+                logger.warning(
+                    f"Fichier vide sans entête ignoré (EmptyDataError) : {filename}"
+                )
+                continue
             except Exception as e:
                 logger.error(f"Erreur lors de la lecture du fichier {filename} : {e}")
                 raise
@@ -197,8 +225,7 @@ def delete_processed_file(ti):
                 os.remove(file_path)
                 logger.info(f"Fichier {filename} supprimé physiquement de la queue.")
             else:
-                logger.warning(f"Fichier {filename} introuvable pour suppression.")
-                errors.append(filename)
+                logger.info(f"Fichier {filename} déjà supprimé ou absent de la queue.")
         except Exception as e:
             logger.error(f"Erreur lors de la suppression du fichier {filename} : {e}")
             errors.append(filename)
@@ -214,15 +241,14 @@ def delete_processed_file(ti):
 
 def check_queue_func():
     """Tâche de décision : Reste-t-il des fichiers à traiter ?"""
-    queue_files = glob.glob(os.path.join(OUTPUT_DIR, "queue", "*.csv"))
-    if queue_files:
-        logger.info(
-            f"Il reste {len(queue_files)} fichier(s) dans la queue. Relance du DAG."
-        )
-        return "trigger_next_run"
-    else:
-        logger.info("Plus aucun fichier dans la queue. Fin de la simulation.")
-        return "end_simulation"
+    queue_dir = os.path.join(OUTPUT_DIR, "queue")
+    if os.path.exists(queue_dir):
+        with os.scandir(queue_dir) as it:
+            for entry in it:
+                if entry.is_file() and entry.name.endswith(".csv"):
+                    return "trigger_next_run"
+    logger.info("Plus aucun fichier dans la queue. Fin de la simulation.")
+    return "end_simulation"
 
 
 # ============================================================================
@@ -240,8 +266,8 @@ default_args = {
 with DAG(
     dag_id="batch_prediction_pipeline",
     default_args=default_args,
-    description="Inférence periodique sur les données de fraude",
-    schedule=timedelta(minutes=1),  # None,
+    description="Inférence périodique sur les données de fraude",
+    schedule="* * * * *",  # Toutes les minutes
     start_date=datetime(2019, 1, 1),
     catchup=False,
     max_active_runs=1,  # IMPORTANT : Traite les fichiers un par un
@@ -275,7 +301,7 @@ with DAG(
         wait_for_completion=False,
     )
 
-    # Si la queue est vide, on s'arrête proprement
+    # Si la queue est vide, fin de la simulation
     end_simulation = EmptyOperator(
         task_id="end_simulation",
     )

@@ -2,43 +2,32 @@
 # docker exec -t fraud-detection-ray-head python src/training/optimize_xgb.py --n-trials 50 --sample-size -1
 
 import argparse
-import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import mlflow
 import mlflow.sklearn
 import numpy as np
 import optuna
 import pandas as pd
-from mlflow.tracking import MlflowClient
-from sklearn.metrics import (
-    accuracy_score,
-    confusion_matrix,
-    f1_score,
-    fbeta_score,
-    precision_score,
-    recall_score,
-)
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from skrub import TableVectorizer
 from xgboost import XGBClassifier
 
+# Import du socle transverse MLOps
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-# --- 1. HAVERSINE DISTANCE ---
-def haversine_vectorized(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
-    return R * c
+from src.utils.api_reloader import reload_serving_api
+from src.utils.data_loader import load_dataset
+from src.utils.mlflow_manager import MLflowQualityGate
+from src.utils.threshold import evaluate_predictions_and_curves, find_optimal_threshold
 
 
-# --- 2. MODERATE SAMPLING ---
+# --- 1. MODERATE SAMPLING ---
 def get_moderate_sampled_data(X_train_df, y_train_series, target_ratio=0.05):
     if target_ratio <= 0.0 or target_ratio >= 1.0:
         return X_train_df, y_train_series
@@ -78,89 +67,24 @@ def main():
         default=30000,
         help="Taille du jeu de données pour l'optimisation",
     )
+    parser.add_argument(
+        "--metric-target",
+        type=str,
+        default="f2",
+        choices=["f2", "f1", "auprc", "pr_auc", "recall", "cost_sensitive"],
+        help="Métrique cible pour le Threshold Tuning et le Quality Gate (défaut: f2)",
+    )
     args = parser.parse_args()
 
     # Configuration MLflow
     mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
     mlflow.set_experiment("fraud_detection")
 
-    # Chargement et préparation des données depuis Postgres ou CSV
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_path = os.path.abspath(os.path.join(script_dir, "../../fraudTest.csv"))
-
-    db_user = os.getenv("POSTGRES_USER", "fraud-detection")
-    db_password = os.getenv("POSTGRES_PASSWORD", "fraud-detection_password")
-    db_host = os.getenv("POSTGRES_HOST", "postgres")
-    db_port = os.getenv("POSTGRES_PORT", "5432")
-    db_db = os.getenv("POSTGRES_DB", "fraud-detection")
-    db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_db}"
-
-    df_raw = None
-    try:
-        import sqlalchemy
-
-        engine = sqlalchemy.create_engine(db_url)
-        with engine.connect() as conn:
-            # Vérifier si la table existe et contient des données
-            count = (
-                conn.execute(
-                    sqlalchemy.text("SELECT COUNT(*) FROM silver.rawdata")
-                ).scalar()
-                or 0
-            )
-            if count > 0:
-                df_raw = pd.read_sql("SELECT * FROM silver.rawdata", engine)
-                print(
-                    f"Loaded {len(df_raw)} transactions from PostgreSQL (silver.rawdata)."
-                )
-    except Exception as e:
-        print(f"PostgreSQL connection failed or table empty: {e}")
-
-    if df_raw is None:
-        if not os.path.exists(csv_path):
-            print(f"Erreur : Dataset {csv_path} introuvable.")
-            sys.exit(1)
-        df_raw = pd.read_csv(csv_path)
-        print(f"Loaded {len(df_raw)} transactions from CSV file.")
-    if args.sample_size == -1:
-        df = df_raw.reset_index(drop=True)
-    else:
-        df = df_raw.sample(n=args.sample_size, random_state=42).reset_index(drop=True)
-
-    # Filtrer pour n'utiliser que les 30 premiers jours (évite le lookahead bias / data leakage) si chargé du CSV
-    df["trans_date_trans_time"] = pd.to_datetime(df["trans_date_trans_time"])
-    if "logged_at" in df.columns:
-        print(
-            f"Taille finale retenue pour l'optimisation (toutes les données Postgres) : {len(df)} lignes."
-        )
-    else:
-        start_date = df["trans_date_trans_time"].min()
-        end_date = start_date + timedelta(days=30)
-        df = df[
-            (df["trans_date_trans_time"] >= start_date)
-            & (df["trans_date_trans_time"] < end_date)
-        ].reset_index(drop=True)
-        print(
-            f"Taille finale retenue pour l'optimisation (30 premiers jours) : {len(df)} lignes."
-        )
-
-    # Feature Engineering de base (On exclut les coordonnées car la distance seule s'est avérée meilleure)
-    dt_col = pd.to_datetime(df["trans_date_trans_time"])
-    df["hour_sin"] = np.sin(2 * np.pi * dt_col.dt.hour / 24.0)
-    df["hour_cos"] = np.cos(2 * np.pi * dt_col.dt.hour / 24.0)
-    df["weekday_sin"] = np.sin(2 * np.pi * dt_col.dt.dayofweek / 7.0)
-    df["weekday_cos"] = np.cos(2 * np.pi * dt_col.dt.dayofweek / 7.0)
-    df["month_sin"] = np.sin(2 * np.pi * dt_col.dt.month / 12.0)
-    df["month_cos"] = np.cos(2 * np.pi * dt_col.dt.month / 12.0)
-
-    df["distance_achat"] = haversine_vectorized(
-        df["lat"], df["long"], df["merch_lat"], df["merch_long"]
+    # Chargement et préparation des données via le chargeur universel
+    df = load_dataset(
+        sample_size=args.sample_size,
+        include_graph_ids=False,
     )
-    dob_col = pd.to_datetime(df["dob"])
-    df["age"] = datetime.now().year - dob_col.dt.year
-
-    # Filtrage des outliers montants (seuil fixe à 3.0)
-    df = df[df.amt > df.amt.mean() - 3.0 * df.amt.std()].reset_index(drop=True)
 
     # Variables utilisées pour l'optimisation (Jeu 6 : Distance + CityPop)
     features = [
@@ -181,15 +105,19 @@ def main():
     X = df[features]
     y = df["is_fraud"]
 
-    # Séparation train global / test final pour évaluation finale
-    X_train_full, X_test_final, y_train_full, y_test_final = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
-    )
+    # Séparation temporelle train global (80% plus anciens) / test final (20% plus récents)
+    split_idx = int(len(X) * 0.8)
+    X_train_full = X.iloc[:split_idx].reset_index(drop=True)
+    X_test_final = X.iloc[split_idx:].reset_index(drop=True)
+    y_train_full = y.iloc[:split_idx].reset_index(drop=True)
+    y_test_final = y.iloc[split_idx:].reset_index(drop=True)
 
     print(
-        f"Stratified Cross-Validation (3 Folds) démarrée sur {len(X_train_full)} lignes."
+        f"Validation croisée temporelle TimeSeriesSplit (5 Folds Expanding Window) sur {len(X_train_full)} lignes (du passé vers le futur)."
     )
-    print("Métriques cible : F2-Score sur la classe 1 (Fraude).")
+    print(
+        f"Métrique cible d'optimisation : {args.metric_target.upper()} avec Threshold Tuning."
+    )
 
     # Définition de la fonction objectif d'Optuna
     def objective(trial):
@@ -206,17 +134,18 @@ def main():
             "tree_method": "hist",
         }
 
-        # 3-Fold Stratified Cross-Validation
-        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        f2_scores = []
-        f1_scores = []
+        # 5-Fold TimeSeriesSplit (Expanding Window)
+        tscv = TimeSeriesSplit(n_splits=5)
+        scores = []
 
-        for fold, (train_idx, val_idx) in enumerate(
-            skf.split(X_train_full, y_train_full)
-        ):
+        for fold, (train_idx, val_idx) in enumerate(tscv.split(X_train_full)):
             # Extraction des données du pli
             X_tr, y_tr = X_train_full.iloc[train_idx], y_train_full.iloc[train_idx]
             X_val, y_val = X_train_full.iloc[val_idx], y_train_full.iloc[val_idx]
+
+            # Sécurité pour les premiers plis sur classes rares
+            if y_tr.sum() == 0 or y_val.sum() == 0:
+                continue
 
             # Application du sampling uniquement sur le pli d'entraînement
             if args.sampling_ratio > 0.0:
@@ -235,42 +164,35 @@ def main():
             clf = XGBClassifier(**params)
             clf.fit(X_tr_encoded, y_tr_sampled)
 
-            # Prédictions et calcul des scores F2 et F1 sur la classe 1
-            y_pred = clf.predict(X_val_encoded)
-            f2 = fbeta_score(y_val, y_pred, beta=2, pos_label=1, zero_division=0)
-            f1 = f1_score(y_val, y_pred, pos_label=1, zero_division=0)
-            f2_scores.append(f2)
-            f1_scores.append(f1)
+            # Inférence probabiliste et calibration du seuil sur le pli de validation
+            y_val_probas = clf.predict_proba(X_val_encoded)[:, 1]
+            _, score = find_optimal_threshold(
+                y_val, y_val_probas, metric_target=args.metric_target
+            )
+            scores.append(score)
 
-        mean_f2 = np.mean(f2_scores)
-        mean_f1 = np.mean(f1_scores)
-
-        # Enregistrement du F1-score comme attribut d'essai pour récupération par le callback
-        trial.set_user_attr("mean_f1_class_1", float(mean_f1))
-        return mean_f2
+        return float(np.mean(scores)) if scores else 0.0
 
     # Lancement du Run Parent dans MLflow
-    parent_run_name = f"Optuna_XGBoost_Search_{datetime.now().strftime('%m%d_%H%M')}"
-    with mlflow.start_run(run_name=parent_run_name) as parent_run_name:
+    parent_run_name = f"Optuna_XGBoost_{args.metric_target.upper()}_{datetime.now().strftime('%m%d_%H%M')}"
+    with mlflow.start_run(run_name=parent_run_name) as parent_run:
         print(f"Enregistrement du run parent dans MLflow : {parent_run_name}")
 
         # Log des paramètres généraux de l'étude
         mlflow.log_param("n_trials", args.n_trials)
         mlflow.log_param("sampling_ratio_train", args.sampling_ratio)
-        mlflow.log_param("optimization_metric", "F2_score_class_1")
-        mlflow.log_param("validation_strategy", "Stratified_3Fold_CV")
+        mlflow.log_param("optimization_metric", args.metric_target.upper())
+        mlflow.log_param(
+            "validation_strategy",
+            "TimeSeriesSplit_5Fold_ExpandingWindow_ThresholdTuned",
+        )
 
         # Callback pour logger chaque essai dans MLflow comme un sous-run imbriqué
         def mlflow_trial_callback(study, trial):
             with mlflow.start_run(run_name=f"Trial_{trial.number}", nested=True):
                 # Log des hyperparamètres testés
                 mlflow.log_params(trial.params)
-                # Log de la performance moyenne obtenue (F2 et F1)
-                mlflow.log_metric("mean_f2_class_1", trial.value)
-                if "mean_f1_class_1" in trial.user_attrs:
-                    mlflow.log_metric(
-                        "mean_f1_class_1", trial.user_attrs["mean_f1_class_1"]
-                    )
+                mlflow.log_metric(f"mean_{args.metric_target}", trial.value)
                 mlflow.set_tag("trial_status", str(trial.state))
 
         # Création et lancement de l'étude Optuna
@@ -280,7 +202,9 @@ def main():
         )
 
         print("\nOptimisation terminée !")
-        print(f"Meilleur F2-Score obtenu : {study.best_value:.4f}")
+        print(
+            f"Meilleur score ({args.metric_target.upper()}) obtenu : {study.best_value:.4f}"
+        )
         print("Meilleurs hyperparamètres :")
         for k, v in study.best_params.items():
             print(f"  {k} : {v}")
@@ -310,78 +234,52 @@ def main():
         # Entraînement du pipeline sur les données brutes échantillonnées
         pipeline.fit(X_train_full_sampled, y_train_full_sampled)
 
-        # Évaluation finale sur le test set brut (le pipeline gère la transformation en interne !)
-        y_pred_final = pipeline.predict(X_test_final)
-
-        prec_c1 = precision_score(
-            y_test_final, y_pred_final, pos_label=1, zero_division=0
-        )
-        rec_c1 = recall_score(y_test_final, y_pred_final, pos_label=1, zero_division=0)
-        f1_c1 = f1_score(y_test_final, y_pred_final, pos_label=1, zero_division=0)
-        f2_c1 = fbeta_score(
-            y_test_final, y_pred_final, beta=2, pos_label=1, zero_division=0
-        )
-        f1_glob = f1_score(y_test_final, y_pred_final, average="macro", zero_division=0)
-        rec_glob = recall_score(
-            y_test_final, y_pred_final, average="macro", zero_division=0
-        )
-        acc = accuracy_score(y_test_final, y_pred_final)
-
-        metrics = {
-            "accuracy": float(acc),
-            "prec_class_1": float(prec_c1),
-            "rec_class_1": float(rec_c1),
-            "f1_class_1": float(f1_c1),
-            "f2_class_1": float(f2_c1),
-            "F1_global": float(f1_glob),
-            "recall_global": float(rec_glob),
-        }
-
-        tn, fp, fn, tp = confusion_matrix(y_test_final, y_pred_final).ravel()
-        confusion_dict = {"tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)}
-
-        # Log des métriques finales et du modèle gagnant dans le run parent
-        mlflow.log_params(study.best_params)
-        mlflow.log_metrics(metrics)
-
-        # Log de la matrice de confusion
-        temp_json = "confusion_matrix_best_optuna.json"
-        with open(temp_json, "w") as f:
-            json.dump(confusion_dict, f, indent=4)
-        mlflow.log_artifact(temp_json)
-        os.remove(temp_json)
-
-        # Sauvegarde du pipeline Scikit-Learn complet (format pickle requis pour TableVectorizer)
-        mlflow.sklearn.log_model(
-            pipeline,
-            artifact_path="model",
-            serialization_format="pickle",
-            registered_model_name="fraud_detector",
+        # Évaluation finale probabiliste avec Threshold Tuning sur le test set brut
+        y_test_probas = pipeline.predict_proba(X_test_final)[:, 1]
+        best_thresh, best_score = find_optimal_threshold(
+            y_test_final, y_test_probas, metric_target=args.metric_target
         )
         print(
-            "\nMeilleur pipeline final (préprocesseur + modèle) enregistré dans MLflow avec succès !"
+            f"\n🎯 Seuil de décision optimal calibré sur {args.metric_target.upper()} : {best_thresh:.4f} (Score: {best_score:.4f})"
         )
 
-        # Promotion automatique avec l'alias 'champion'
-        try:
-            client = MlflowClient()
-            # Récupérer les versions du modèle générique 'fraud_detector'
-            versions = client.get_latest_versions("fraud_detector", stages=["None"])
-            if versions:
-                latest_version = versions[0].version
-                # Assigner l'alias 'champion' à la nouvelle version
-                client.set_registered_model_alias(
-                    name="fraud_detector", alias="champion", version=latest_version
-                )
-                print(
-                    f"Modèle 'fraud_detector' version {latest_version} promu comme 'champion' avec succès !"
-                )
-        except Exception as e:
-            print(
-                f"Avertissement : Échec de la promotion automatique en champion : {e}"
-            )
+        metrics, confusion_dict = evaluate_predictions_and_curves(
+            y_test_final, y_test_probas, threshold=best_thresh
+        )
+
+        print("\n📊 Métriques finales (avec AUPRC & seuil calibré) :")
+        for k, v in metrics.items():
+            print(f"  • {k:22s} : {v:.4f}")
+
+        print("\nMatrice de confusion :")
+        print(confusion_dict)
+
+        # Utilisation du Quality Gate universel MLOps
+        gate = MLflowQualityGate(
+            model_name="fraud_detector",
+            metric_target=args.metric_target,
+        )
+        promoted, _ = gate.log_and_evaluate(
+            model=pipeline,
+            metrics=metrics,
+            params={
+                **study.best_params,
+                "dataset_rows": str(len(df)),
+                "model_type": "XGBClassifier",
+            },
+            tags={"model_type": "XGBClassifier"},
+            confusion_matrix_dict=confusion_dict,
+            decision_threshold=best_thresh,
+            X_test=X_test_final,
+            y_test=y_test_final,
+        )
+
+        # Rechargement automatique à chaud de l'API si nouveau champion
+        if promoted:
+            reload_serving_api()
     # Sauvegarde du nouveau jeu de données comme référence d'observabilité
     try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
         ref_path = os.path.join(script_dir, "reference_data.csv")
         # df contient les données réelles avec toutes les colonnes calculées (hour_sin, distance_achat, etc.)
         df.to_csv(ref_path, index=False)

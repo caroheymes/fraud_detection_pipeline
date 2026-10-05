@@ -1,6 +1,5 @@
-# src/dashboard/pages/2_Explicabilite_et_champion.py
-
 import os
+import sys
 
 import mlflow
 import numpy as np
@@ -8,6 +7,14 @@ import pandas as pd
 import streamlit as st
 from mlflow.tracking import MlflowClient
 from shapash import SmartExplainer
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from src.utils.db import get_postgres_engine
+from src.utils.features import haversine_vectorized
+from src.utils.mlflow_manager import load_champion_model
 
 st.set_page_config(
     page_title="Explicabilité Shapash & performances du champion",
@@ -21,29 +28,11 @@ st.markdown("---")
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
 
 
-def haversine_vectorized(lat1, lon1, lat2, lon2):
-    R = 6371.0
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
-    return R * c
-
-
 def query_db(query):
-    import psycopg2
-
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("POSTGRES_HOST", "postgres"),
-            database=os.getenv("POSTGRES_DB", "fraud-detection"),
-            user=os.getenv("POSTGRES_USER", "fraud-detection"),
-            password=os.getenv("POSTGRES_PASSWORD", "fraud-detection_password"),
-            port=os.getenv("POSTGRES_PORT", "5432"),
-        )
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        engine = get_postgres_engine()
+        with engine.connect() as conn:
+            df = pd.read_sql_query(query, conn)
         return df
     except Exception:
         return None
@@ -86,11 +75,19 @@ def get_hybrid_explain_sample():
         df_prod["month_sin"] = np.sin(2 * np.pi * dt_col.dt.month / 12.0)
         df_prod["month_cos"] = np.cos(2 * np.pi * dt_col.dt.month / 12.0)
 
+        # Déduplication préalable de df_prod
+        df_prod = df_prod.drop_duplicates(subset=["trans_num"])
         prod_normal = df_prod[df_prod["is_fraud"] == 0]
         prod_fraud = df_prod[df_prod["is_fraud"] == 1]
     else:
+        df_prod = pd.DataFrame()
         prod_normal = pd.DataFrame()
         prod_fraud = pd.DataFrame()
+
+    # Déduplication préalable de df_ref et exclusion des doublons déjà dans df_prod
+    df_ref = df_ref.drop_duplicates(subset=["trans_num"])
+    if not df_prod.empty and "trans_num" in df_prod.columns:
+        df_ref = df_ref[~df_ref["trans_num"].isin(df_prod["trans_num"])]
 
     ref_normal = df_ref[df_ref["is_fraud"] == 0]
     ref_fraud = df_ref[df_ref["is_fraud"] == 1]
@@ -101,7 +98,12 @@ def get_hybrid_explain_sample():
         sample_normal = prod_normal.sample(n=800, random_state=42)
     else:
         n_needed = 800 - n_prod_normal
-        sample_ref_normal = ref_normal.sample(n=n_needed, random_state=42)
+        sample_size_normal = min(n_needed, len(ref_normal))
+        sample_ref_normal = (
+            ref_normal.sample(n=sample_size_normal, random_state=42)
+            if sample_size_normal > 0
+            else pd.DataFrame()
+        )
         sample_normal = pd.concat([prod_normal, sample_ref_normal])
 
     # Échantillonnage de 200 transactions frauduleuses
@@ -110,12 +112,18 @@ def get_hybrid_explain_sample():
         sample_fraud = prod_fraud.sample(n=200, random_state=42)
     else:
         n_needed = 200 - n_prod_fraud
-        sample_ref_fraud = ref_fraud.sample(n=n_needed, random_state=42)
+        sample_size_fraud = min(n_needed, len(ref_fraud))
+        sample_ref_fraud = (
+            ref_fraud.sample(n=sample_size_fraud, random_state=42)
+            if sample_size_fraud > 0
+            else pd.DataFrame()
+        )
         sample_fraud = pd.concat([prod_fraud, sample_ref_fraud])
 
-    # Combinaison et mélange
+    # Combinaison, déduplication stricte et mélange
     df_sample_resorted = (
         pd.concat([sample_normal, sample_fraud])
+        .drop_duplicates(subset=["trans_num"])
         .sample(frac=1.0, random_state=42)
         .reset_index(drop=True)
     )
@@ -140,6 +148,17 @@ def load_shapash_explainer(version_key: str):
     champion_params = {}
 
     try:
+        import __main__
+        import src.training.inductive_grl as ig
+
+        __main__.InductiveGRLPipeline = ig.InductiveGRLPipeline
+        __main__.HinSAGERepresentationLearner = ig.HinSAGERepresentationLearner
+        __main__.HinSAGEPyTorchNet = ig.HinSAGEPyTorchNet
+        __main__.FocalLoss = ig.FocalLoss
+    except Exception:
+        pass
+
+    try:
         client = MlflowClient()
         version_details = client.get_model_version_by_alias(
             "fraud_detector", "champion"
@@ -149,10 +168,17 @@ def load_shapash_explainer(version_key: str):
         champion_run = client.get_run(champion_run_id)
         champion_metrics = champion_run.data.metrics
         champion_params = champion_run.data.params
+        champion_model, _, _ = load_champion_model()
+        if champion_model is None:
+            champion_model = mlflow.sklearn.load_model(f"runs:/{champion_run_id}/model")
+        df_sample_resorted = get_hybrid_explain_sample()
 
-        champion_model = mlflow.sklearn.load_model(f"runs:/{champion_run_id}/model")
-        preprocessor = champion_model.named_steps["preprocessor"]
-        predictor = champion_model.named_steps["model"]
+        if "client_node" not in df_sample_resorted.columns:
+            df_sample_resorted["client_node"] = df_sample_resorted["cc_num"].astype(str)
+        if "merchant_node" not in df_sample_resorted.columns:
+            df_sample_resorted["merchant_node"] = df_sample_resorted["merchant"].astype(
+                str
+            )
 
         features_list = [
             "category",
@@ -168,24 +194,8 @@ def load_shapash_explainer(version_key: str):
             "month_sin",
             "month_cos",
         ]
-        df_sample_resorted = get_hybrid_explain_sample()
-
         X_samp = df_sample_resorted[features_list]
         y_samp = df_sample_resorted["is_fraud"]
-        X_enc = preprocessor.transform(X_samp)
-
-        # Garantir que X_enc est un DataFrame avec des noms de colonnes valides
-        if hasattr(preprocessor, "get_feature_names_out"):
-            cols = [c.split("__")[-1] for c in preprocessor.get_feature_names_out()]
-        else:
-            cols = X_samp.columns.tolist()
-
-        if not isinstance(X_enc, pd.DataFrame):
-            X_enc = pd.DataFrame(X_enc, columns=cols)
-        else:
-            X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
-        X_enc.index = df_sample_resorted["trans_num"].tolist()
-        y_samp.index = X_enc.index
 
         features_groups = {
             "Heure": ["hour_sin", "hour_cos"],
@@ -200,6 +210,54 @@ def load_shapash_explainer(version_key: str):
             "category": "Catégorie d'achat",
             "gender": "Genre",
         }
+
+        if hasattr(champion_model, "named_steps"):
+            preprocessor = champion_model.named_steps["preprocessor"]
+            predictor = champion_model.named_steps["model"]
+            X_enc = preprocessor.transform(X_samp)
+
+            if hasattr(preprocessor, "get_feature_names_out"):
+                cols = [c.split("__")[-1] for c in preprocessor.get_feature_names_out()]
+            else:
+                cols = X_samp.columns.tolist()
+
+            if not isinstance(X_enc, pd.DataFrame):
+                X_enc = pd.DataFrame(X_enc, columns=cols)
+            else:
+                X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
+        elif hasattr(champion_model, "hinsage") and hasattr(
+            champion_model, "classifier"
+        ):
+            test_embeddings = champion_model.hinsage.transform(df_sample_resorted)
+            raw_scaled = champion_model.hinsage._extract_clean_features(
+                df_sample_resorted, is_train=False
+            )
+            X_enc_arr = np.hstack([test_embeddings, raw_scaled])
+            emb_cols = [
+                f"Embedding GRL {i + 1}" for i in range(test_embeddings.shape[1])
+            ]
+            vec_cols = (
+                [
+                    c.split("__")[-1]
+                    for c in champion_model.hinsage.vectorizer.get_feature_names_out()
+                ]
+                if hasattr(champion_model.hinsage.vectorizer, "get_feature_names_out")
+                else [f"feat_{i}" for i in range(raw_scaled.shape[1])]
+            )
+            cols = emb_cols + vec_cols
+            X_enc = pd.DataFrame(X_enc_arr, columns=cols)
+            features_groups["Embeddings Réseau Graphe (HinSAGE)"] = emb_cols
+            preprocessor = champion_model.hinsage.vectorizer
+            predictor = champion_model.classifier
+        else:
+            preprocessor = None
+            predictor = getattr(champion_model, "classifier", champion_model)
+            X_enc = X_samp
+            cols = X_samp.columns.tolist()
+
+        X_enc.index = df_sample_resorted["trans_num"].tolist()
+        y_samp.index = X_enc.index
+
         xpl_obj = SmartExplainer(
             model=predictor,
             features_groups=features_groups,
@@ -218,7 +276,7 @@ def load_shapash_explainer(version_key: str):
         preprocessor_class = (
             getattr(preprocessor, "__class__", type(preprocessor)).__name__
             if preprocessor is not None
-            else "Standard"
+            else "HinSAGE Embedder"
         )
         run_name = getattr(champion_run.info, "run_name", "") or ""
         run_source = champion_run.data.tags.get("mlflow.source.name", "") or ""
@@ -257,10 +315,16 @@ def load_shapash_explainer(version_key: str):
         )
         try:
             client = MlflowClient()
-            experiment = client.get_experiment_by_name("Default")
-            runs = client.search_runs(
-                experiment_ids=[experiment.experiment_id], order_by=["start_time DESC"]
-            )
+            experiment = client.get_experiment_by_name(
+                "fraud_detection"
+            ) or client.get_experiment_by_name("Default")
+            if experiment:
+                runs = client.search_runs(
+                    experiment_ids=[experiment.experiment_id],
+                    order_by=["start_time DESC"],
+                )
+            else:
+                runs = []
             if len(runs) > 0:
                 latest_run = runs[0]
                 champion_run_id = latest_run.info.run_id

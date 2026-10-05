@@ -4,8 +4,6 @@ Inductive Graph Representation Learning (HinSAGE + XGBoost) Pipeline.
 Fournit une classe InductiveGRLPipeline compatible Scikit-Learn pour l'inférence temps réel et batch.
 """
 
-from datetime import datetime
-
 import numpy as np
 import pandas as pd
 import torch
@@ -15,16 +13,8 @@ from sklearn.preprocessing import StandardScaler
 from skrub import TableVectorizer
 from xgboost import XGBClassifier
 
-
-def haversine_vectorized(lat1, lon1, lat2, lon2):
-    """Calcule la distance haversine en kilomètres."""
-    R = 6371.0
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
-    return R * c
+# Import du module features transverse
+from src.utils.features import prepare_features
 
 
 class FocalLoss(nn.Module):
@@ -117,67 +107,29 @@ class HinSAGERepresentationLearner:
         self.tabular_feature_names: list[str] = []
 
     def _prepare_df(self, df_in: pd.DataFrame) -> pd.DataFrame:
-        df = df_in.copy()
-        if "client_node" not in df.columns:
-            if "cc_num" in df.columns:
-                df["client_node"] = df["cc_num"].astype(str)
-            else:
-                df["client_node"] = [f"c_{i}" for i in range(len(df))]
-
-        if "merchant_node" not in df.columns:
-            if "merchant" in df.columns:
-                df["merchant_node"] = df["merchant"].astype(str)
-            else:
-                df["merchant_node"] = [f"m_{i % 100}" for i in range(len(df))]
-
-        if "distance_achat" not in df.columns and {
-            "lat",
-            "long",
-            "merch_lat",
-            "merch_long",
-        }.issubset(df.columns):
-            df["distance_achat"] = haversine_vectorized(
-                df["lat"].astype(float),
-                df["long"].astype(float),
-                df["merch_lat"].astype(float),
-                df["merch_long"].astype(float),
-            )
-
-        if "trans_date_trans_time" in df.columns:
-            dt = pd.to_datetime(df["trans_date_trans_time"])
-            if "hour_sin" not in df.columns:
-                df["hour_sin"] = np.sin(2 * np.pi * dt.dt.hour / 24.0)
-                df["hour_cos"] = np.cos(2 * np.pi * dt.dt.hour / 24.0)
-            if "weekday_sin" not in df.columns:
-                df["weekday_sin"] = np.sin(2 * np.pi * dt.dt.dayofweek / 7.0)
-                df["weekday_cos"] = np.cos(2 * np.pi * dt.dt.dayofweek / 7.0)
-            if "month_sin" not in df.columns:
-                df["month_sin"] = np.sin(2 * np.pi * dt.dt.month / 12.0)
-                df["month_cos"] = np.cos(2 * np.pi * dt.dt.month / 12.0)
-
-        if "age" not in df.columns and "dob" in df.columns:
-            dob_dt = pd.to_datetime(df["dob"])
-            df["age"] = datetime.now().year - dob_dt.dt.year
-
-        return df
+        """Standardise les features, identifiants de graphe et variables temporelles/géographiques."""
+        return prepare_features(df_in, include_graph_ids=True)
 
     def _extract_clean_features(
         self, df_prepared: pd.DataFrame, is_train: bool = True
     ) -> np.ndarray:
-        candidate_cols = [
-            "category",
-            "amt",
-            "gender",
-            "distance_achat",
-            "age",
-            "city_pop",
-            "hour_sin",
-            "hour_cos",
-            "weekday_sin",
-            "weekday_cos",
-            "month_sin",
-            "month_cos",
-        ]
+        if not is_train and hasattr(self.vectorizer, "feature_names_in_"):
+            candidate_cols = list(self.vectorizer.feature_names_in_)
+        else:
+            candidate_cols = [
+                "category",
+                "amt",
+                "gender",
+                "distance_achat",
+                "age",
+                "city_pop",
+                "hour_sin",
+                "hour_cos",
+                "weekday_sin",
+                "weekday_cos",
+                "month_sin",
+                "month_cos",
+            ]
         present_cols = [c for c in candidate_cols if c in df_prepared.columns]
         raw_feats = df_prepared[present_cols]
 
@@ -208,41 +160,55 @@ class HinSAGERepresentationLearner:
         X_train = self._extract_clean_features(df_prep, is_train=True)
         in_dim = X_train.shape[1]
 
-        # 1. Calcul des statistiques de voisinage pour chaque client et marchand (1-hop)
-        client_groups = {}
-        merchant_groups = {}
-        for idx, row in df_prep.reset_index(drop=True).iterrows():
-            c_id = str(row["client_node"])
-            m_id = str(row["merchant_node"])
-            client_groups.setdefault(c_id, []).append(X_train[idx])
-            merchant_groups.setdefault(m_id, []).append(X_train[idx])
+        # 1. Calcul ultra-rapide des statistiques de voisinage (1-hop)
+        client_nodes = df_prep["client_node"].astype(str).values
+        merchant_nodes = df_prep["merchant_node"].astype(str).values
+
+        c_indices: dict[str, list[int]] = {}
+        m_indices: dict[str, list[int]] = {}
+        for idx, (c, m) in enumerate(zip(client_nodes, merchant_nodes)):
+            c_indices.setdefault(c, []).append(idx)
+            m_indices.setdefault(m, []).append(idx)
 
         self.client_stats = {
-            c_id: np.append(np.mean(feats, axis=0), np.log1p(len(feats)))
-            for c_id, feats in client_groups.items()
+            c: np.append(np.mean(X_train[idxs], axis=0), np.log1p(len(idxs))).astype(
+                np.float32
+            )
+            for c, idxs in c_indices.items()
         }
         self.merchant_stats = {
-            m_id: np.append(np.mean(feats, axis=0), np.log1p(len(feats)))
-            for m_id, feats in merchant_groups.items()
+            m: np.append(np.mean(X_train[idxs], axis=0), np.log1p(len(idxs))).astype(
+                np.float32
+            )
+            for m, idxs in m_indices.items()
         }
 
-        mean_feat = np.mean(X_train, axis=0)
-        self.global_client_stat = np.append(mean_feat, 0.0)
-        self.global_merchant_stat = np.append(mean_feat, 0.0)
+        mean_feat = np.mean(X_train, axis=0).astype(np.float32)
+        self.global_client_stat = np.append(mean_feat, 0.0).astype(np.float32)
+        self.global_merchant_stat = np.append(mean_feat, 0.0).astype(np.float32)
 
-        # 2. Construction des tenseurs
-        h_c_list = [self.client_stats[str(c)] for c in df_prep["client_node"]]
-        h_m_list = [self.merchant_stats[str(m)] for m in df_prep["merchant_node"]]
+        # 2. Construction préallouée ultra-rapide des tenseurs de voisinage pour le train (0.02s)
+        stat_dim = self.global_client_stat.shape[0]
+        h_c_arr = np.empty((len(client_nodes), stat_dim), dtype=np.float32)
+        h_m_arr = np.empty((len(merchant_nodes), stat_dim), dtype=np.float32)
+        for i, c in enumerate(client_nodes):
+            h_c_arr[i] = self.client_stats[c]
+        for i, m in enumerate(merchant_nodes):
+            h_m_arr[i] = self.merchant_stats[m]
 
-        x_t_tensor = torch.tensor(X_train, dtype=torch.float32)
-        h_c_tensor = torch.tensor(np.array(h_c_list), dtype=torch.float32)
-        h_m_tensor = torch.tensor(np.array(h_m_list), dtype=torch.float32)
-        y_tensor = torch.tensor(y_train.values.astype(float), dtype=torch.float32)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        x_t_tensor = torch.tensor(X_train, dtype=torch.float32, device=device)
+        h_c_tensor = torch.tensor(h_c_arr, dtype=torch.float32, device=device)
+        h_m_tensor = torch.tensor(h_m_arr, dtype=torch.float32, device=device)
+        y_tensor = torch.tensor(
+            y_train.values.astype(float), dtype=torch.float32, device=device
+        )
 
         # 3. Entraînement PyTorch
         self.net = HinSAGEPyTorchNet(
             in_features=in_dim, emb_dim=self.emb_dim, hidden_dim=self.hidden_dim
-        )
+        ).to(device)
         optimizer = torch.optim.AdamW(
             self.net.parameters(), lr=self.lr, weight_decay=1e-4
         )
@@ -270,18 +236,26 @@ class HinSAGERepresentationLearner:
         df_prep = self._prepare_df(test_df)
         X_test = self._extract_clean_features(df_prep, is_train=False)
 
-        h_c_list = [
-            self.client_stats.get(str(c), self.global_client_stat)
-            for c in df_prep["client_node"]
-        ]
-        h_m_list = [
-            self.merchant_stats.get(str(m), self.global_merchant_stat)
-            for m in df_prep["merchant_node"]
-        ]
+        c_nodes_test = df_prep["client_node"].astype(str).values
+        m_nodes_test = df_prep["merchant_node"].astype(str).values
 
-        x_t_tensor = torch.tensor(X_test, dtype=torch.float32)
-        h_c_tensor = torch.tensor(np.array(h_c_list), dtype=torch.float32)
-        h_m_tensor = torch.tensor(np.array(h_m_list), dtype=torch.float32)
+        stat_dim = self.global_client_stat.shape[0]
+        h_c_arr = np.empty((len(c_nodes_test), stat_dim), dtype=np.float32)
+        h_m_arr = np.empty((len(m_nodes_test), stat_dim), dtype=np.float32)
+        for i, c in enumerate(c_nodes_test):
+            h_c_arr[i] = self.client_stats.get(c, self.global_client_stat)
+        for i, m in enumerate(m_nodes_test):
+            h_m_arr[i] = self.merchant_stats.get(m, self.global_merchant_stat)
+
+        device = (
+            next(self.net.parameters()).device
+            if self.net is not None
+            else torch.device("cpu")
+        )
+
+        x_t_tensor = torch.tensor(X_test, dtype=torch.float32, device=device)
+        h_c_tensor = torch.tensor(h_c_arr, dtype=torch.float32, device=device)
+        h_m_tensor = torch.tensor(h_m_arr, dtype=torch.float32, device=device)
 
         self.net.eval()
         with torch.no_grad():
@@ -325,6 +299,15 @@ class InductiveGRLPipeline(BaseEstimator, ClassifierMixin):
         )
         self.classifier = XGBClassifier(**self.xgb_params)
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if "decision_threshold" not in self.__dict__:
+            self.decision_threshold = 0.5
+        if "xgb_params" not in self.__dict__:
+            self.xgb_params = {}
+        if "add_additional_data" not in self.__dict__:
+            self.add_additional_data = True
+
     def _prepare_features(self, df: pd.DataFrame, embeddings: np.ndarray) -> np.ndarray:
         if not self.add_additional_data:
             return embeddings
@@ -346,10 +329,30 @@ class InductiveGRLPipeline(BaseEstimator, ClassifierMixin):
 
     def predict(self, X_df: pd.DataFrame) -> np.ndarray:
         probas = self.predict_proba(X_df)[:, 1]
-        return (probas >= self.decision_threshold).astype(int)
+        return (probas >= getattr(self, "decision_threshold", 0.5)).astype(int)
 
     def get_feature_names_out(self):
         emb_names = [f"hinsage_emb_{i}" for i in range(self.embedding_size)]
-        if self.add_additional_data:
-            return emb_names + self.hinsage.tabular_feature_names
+        if getattr(self, "add_additional_data", True):
+            if (
+                hasattr(self.hinsage, "tabular_feature_names")
+                and self.hinsage.tabular_feature_names
+            ):
+                return emb_names + list(self.hinsage.tabular_feature_names)
+            elif hasattr(self.hinsage, "vectorizer") and hasattr(
+                self.hinsage.vectorizer, "get_feature_names_out"
+            ):
+                try:
+                    return emb_names + list(
+                        self.hinsage.vectorizer.get_feature_names_out()
+                    )
+                except Exception:
+                    pass
         return emb_names
+
+
+# Forcer le namespace canonique pour garantir une sérialisation pickle portable hors __main__
+FocalLoss.__module__ = "src.training.inductive_grl"
+HinSAGEPyTorchNet.__module__ = "src.training.inductive_grl"
+HinSAGERepresentationLearner.__module__ = "src.training.inductive_grl"
+InductiveGRLPipeline.__module__ = "src.training.inductive_grl"

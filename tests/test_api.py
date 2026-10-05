@@ -9,13 +9,6 @@ import numpy as np
 # Ajouter la racine du projet au path pour éviter les erreurs d'import en CI/CD
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# 1. Mock de MLflow, de Redis et de SHAP avant d'importer l'API pour désactiver les connexions réseau
-sys.modules["mlflow"] = MagicMock()
-sys.modules["mlflow.sklearn"] = MagicMock()
-sys.modules["redis"] = MagicMock()
-sys.modules["shap"] = MagicMock()
-sys.modules["sqlalchemy"] = MagicMock()
-
 
 # Création d'un faux modèle pour simuler l'inférence XGBoost
 class DummyXGBoostModel:
@@ -45,6 +38,7 @@ from src.api.main import app, haversine_vectorized
 # Configuration des variables globales de l'API pour les tests (injection de mocks)
 api_module.model_pipeline = dummy_pipeline
 api_module.model_run_id = "test_xgb_champion_v1"
+api_module.db_engine = MagicMock()
 
 # Mock de Redis pour retourner des règles configurées
 mock_redis = MagicMock()
@@ -102,10 +96,29 @@ def test_cyclical_inverse_retransformation():
 
 
 def test_api_health():
-    """Vérifie que la route de diagnostic /health fonctionne"""
+    """Vérifie que la route de diagnostic /health fonctionne et renvoie l'active_model"""
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["active_model"] == "test_xgb_champion_v1"
+
+
+def test_api_model_info():
+    """Vérifie la route /model-info"""
+    response = client.get("/model-info")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["active_model_version"] == "test_xgb_champion_v1"
+    assert "decision_threshold" in data
+
+
+def test_api_reload_model():
+    """Vérifie la route /reload-model"""
+    response = client.post("/reload-model")
+    assert response.status_code == 200
+    data = response.json()
+    assert "status" in data
 
 
 def test_api_predict_batch_schema():

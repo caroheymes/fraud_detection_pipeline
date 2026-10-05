@@ -19,32 +19,26 @@ import mlflow
 import mlflow.sklearn
 import numpy as np
 import pandas as pd
-import redis
 import shap
 from fastapi import BackgroundTasks, FastAPI, Header
 from pydantic import BaseModel
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
-# --- 1. CONFIGURATION POSTGRESQL ---
-pg_user = os.getenv("POSTGRES_USER", "fraud-detection")
-pg_password = os.getenv("POSTGRES_PASSWORD", "fraud-detection_password")
-pg_host = os.getenv("POSTGRES_HOST", "postgres")
-pg_port = os.getenv("POSTGRES_PORT", "5432")
-pg_db = os.getenv("POSTGRES_DB", "fraud-detection")
+from src.utils.db import get_postgres_engine, get_redis_client
+from src.utils.features import haversine_vectorized
+from src.utils.mlflow_manager import load_champion_model as fetch_champion_model
 
-DATABASE_URL = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
-db_engine = create_engine(DATABASE_URL)
-
-# --- 1.5. CONFIGURATION REDIS ---
-redis_host = os.getenv("REDIS_HOST", "redis")
-redis_client = None
-try:
-    redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+# --- 1. CONFIGURATION POSTGRESQL & REDIS VIA SRC.UTILS.DB ---
+db_engine = get_postgres_engine()
+redis_client = get_redis_client()
+if redis_client is not None:
     print("Connexion globale à Redis pour l'API initialisée.")
-except Exception as re_err:
-    print(f"Avertissement : Connexion à Redis impossible pour l'API : {re_err}")
+else:
+    print("Avertissement : Connexion à Redis impossible pour l'API.")
 
 # --- 2. CONFIGURATION DE L'APPLICATION FASTAPI ---
+active_decision_threshold: float = 0.50
+
 app = FastAPI(
     title="API de Détection de Fraude - MLOps",
     description="Inférence en temps réel avec double scoring : Règles Redis (Fast Pass) + XGBoost.",
@@ -146,18 +140,7 @@ class WebhookRequest(BaseModel):
 # Variables globales pour le modèle ML
 model_pipeline = None
 model_run_id = "unknown"
-DECISION_THRESHOLD = float(os.getenv("DECISION_THRESHOLD", "0.85"))
-
-
-# --- 4. FONCTIONS DE CALCUL AUXILIAIRES ---
-def haversine_vectorized(lat1, lon1, lat2, lon2):
-    R = 6371.0  # Rayon de la Terre en km
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
-    return R * c
+DECISION_THRESHOLD = float(os.getenv("DECISION_THRESHOLD", "0.50"))
 
 
 # --- 4.5. CALCUL SHAP EN TEMPS RÉEL (EXPLICABILITÉ) ---
@@ -213,7 +196,10 @@ def compute_shap_values(model_pipeline, X):
             ]:
                 if col in feature_names:
                     idx = feature_names.index(col)
-                    row_dict[col] = float(raw_shap[i, idx])
+                    val = raw_shap[i, idx]
+                    if hasattr(val, "__len__"):
+                        val = np.ravel(val)[0]
+                    row_dict[col] = float(val)
                 else:
                     row_dict[col] = 0.0
             shap_dicts.append(row_dict)
@@ -282,21 +268,15 @@ def send_fraud_webhook(
     )
 
     payload = {
-        "event": "transaction.suspecte",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "data": {
-            "transaction_id": transaction_data.get("trans_num"),
-            "amount": float(transaction_data.get("amt", 0.0)),
-            "category": transaction_data.get("category"),
-            "merchant": transaction_data.get("merchant"),
-            "prediction": int(prediction),
-            "prediction_proba": float(probability),
-            "explications_shap": shap_values,
-        },
+        "transaction_id": str(transaction_data.get("trans_num")),
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "x-merchant-token": "demo-secret-key-123",
     }
 
     try:
-        response = httpx.post(webhook_url, json=payload, timeout=5.0)
+        response = httpx.post(webhook_url, json=payload, headers=headers, timeout=5.0)
         if response.status_code in [200, 201, 202]:
             print(
                 f"[Webhook MLOps] Notification envoyée avec succès au marchand pour la transaction {transaction_data.get('trans_num')}."
@@ -311,18 +291,9 @@ def send_fraud_webhook(
         )
 
 
-# --- 6. INITIALISATION AU DÉMARRAGE ---
-@app.on_event("startup")
-def startup_event():
-    global model_pipeline
-    global model_run_id
-    print("--- DÉMARRAGE DE L'API : CHARGEMENT DU MODÈLE CHAMPION ---")
-
-    # 1. Configuration MLflow
-    mlflow_uri = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
-    mlflow.set_tracking_uri(mlflow_uri)
-
-    # 2. Initialisation de la base de données & Alteration du schéma
+# --- 6. GESTION DU MODÈLE CHAMPION & SYNCHRONISATION AUTOMATIQUE ---
+def init_postgres_schema():
+    """Initialisation et migration sécurisée du schéma PostgreSQL."""
     try:
         with db_engine.connect() as conn:
             conn.execute(text("CREATE SCHEMA IF NOT EXISTS silver;"))
@@ -363,106 +334,115 @@ def startup_event():
             """)
             )
 
-            # Ajout sécurisé des colonnes si la table pré-existait sans elles
-            try:
-                conn.execute(
-                    text(
-                        "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS prediction_latency_ms NUMERIC(10, 4);"
-                    )
-                )
-                conn.execute(
-                    text(
-                        "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS shap_values JSONB;"
-                    )
-                )
-                conn.execute(
-                    text(
-                        "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_suspicion INT;"
-                    )
-                )
-                conn.execute(
-                    text(
-                        "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_score INT;"
-                    )
-                )
-                conn.commit()
-            except Exception as schema_err:
-                print(
-                    f"[Postgres Schema Update] Erreur de mise à niveau de table : {schema_err}"
-                )
-
-            # S'assurer que les deux colonnes d'observabilité Fast Pass existent dans la table
-            conn.execute(
-                text(
-                    "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_suspicion INT DEFAULT 0;"
-                )
-            )
-            conn.execute(
-                text(
-                    "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_score INT DEFAULT 0;"
-                )
-            )
+            # Colonnes d'observabilité
+            for col_sql in [
+                "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS prediction_latency_ms NUMERIC(10, 4);",
+                "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS shap_values JSONB;",
+                "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_suspicion INT DEFAULT 0;",
+                "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_score INT DEFAULT 0;",
+            ]:
+                try:
+                    conn.execute(text(col_sql))
+                except Exception:
+                    pass
             conn.commit()
-            print(
-                "Schéma de la base PostgreSQL validé (Insert-only avec colonnes Fast Pass)."
-            )
+            print("[Postgres MLOps] Schéma silver.rawdata validé.")
     except Exception as e:
-        print(f"Erreur critique lors de la connexion/migration de PostgreSQL : {e}")
+        print(f"[Postgres MLOps] Erreur schéma : {e}")
 
-    # 3. Récupération du modèle champion depuis le registre MLflow
-    try:
-        model_uri = "models:/fraud_detector@champion"
-        model_pipeline = mlflow.sklearn.load_model(model_uri)
 
-        # Résolution dynamique de version du modèle champion
+def load_champion_model():
+    """Charge ou recharge le modèle Champion actif depuis MLflow via le gestionnaire MLOps."""
+    global model_pipeline
+    global model_run_id
+    global active_decision_threshold
+
+    loaded_model, new_version_id, new_threshold = fetch_champion_model(
+        model_name="fraud_detector",
+        alias="champion",
+        fallback_uri="runs:/dba1e5b2807b4785a89dc0d23a247c17/model",
+    )
+    if loaded_model is not None:
+        model_pipeline = loaded_model
+        model_run_id = new_version_id
+        active_decision_threshold = float(new_threshold)
+    return model_run_id
+
+
+async def auto_sync_champion_loop(check_interval_seconds: int = 10):
+    """Tâche d'arrière-plan surveillant automatiquement les promotions dans MLflow."""
+    global model_run_id
+    print(
+        f"[MLOps Auto-Sync] 🔄 Boucle de synchronisation automatique activée ({check_interval_seconds}s intervalle)."
+    )
+    import asyncio
+
+    while True:
         try:
+            await asyncio.sleep(check_interval_seconds)
             from mlflow.tracking import MlflowClient
 
             client = MlflowClient()
             version_details = client.get_model_version_by_alias(
                 "fraud_detector", "champion"
             )
-            model_run_id = f"fraud_detector_v{version_details.version}"
-        except Exception:
-            model_run_id = "fraud_detector_champion"
+            target_id = f"fraud_detector_v{version_details.version}"
 
-        print(
-            f"Modèle '{model_uri}' chargé avec l'identifiant version '{model_run_id}'."
-        )
-    except Exception as e:
-        print(f"Impossible de charger le modèle champion : {e}")
-        print("Tentative de chargement du modèle de fallback...")
-        try:
-            model_uri = "runs:/dba1e5b2807b4785a89dc0d23a247c17/model"
-            model_pipeline = mlflow.sklearn.load_model(model_uri)
-            model_run_id = "runs_dba1e5b2"
-            print("Modèle de secours chargé en mémoire.")
-        except Exception as fallback_err:
-            print(
-                f"Erreur critique lors du chargement du modèle de secours : {fallback_err}"
-            )
+            if model_run_id != target_id:
+                print(
+                    f"[MLOps Auto-Sync] 🔔 Nouvelle version Champion détectée dans MLflow : {target_id} (actuelle en RAM: {model_run_id}). Rechargement automatique..."
+                )
+                load_champion_model()
+        except Exception:
+            pass
+
+
+@app.on_event("startup")
+async def startup_event():
+    import asyncio
+
+    print("--- DÉMARRAGE DE L'API FRAUD DETECTION MLOPS ---")
+    mlflow_uri = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+    mlflow.set_tracking_uri(mlflow_uri)
+
+    init_postgres_schema()
+    load_champion_model()
+
+    # Démarrage de la synchronisation automatique en arrière-plan
+    asyncio.create_task(auto_sync_champion_loop(check_interval_seconds=10))
 
 
 # --- 7. ROUTES HTTP ---
 @app.get("/")
 def read_root():
     return {
-        "message": "Bienvenue sur l'API de Détection de Fraude - MLOps. Utilisez /predict_batch pour l'inférence"
+        "message": "Bienvenue sur l'API de Détection de Fraude - MLOps. Utilisez /predict_batch pour l'inférence",
+        "active_model": model_run_id,
     }
 
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "active_model": model_run_id}
+
+
+@app.get("/model-info")
+def model_info():
+    return {
+        "status": "success",
+        "active_model_version": model_run_id,
+        "decision_threshold": active_decision_threshold,
+    }
 
 
 @app.post("/reload-model")
 def reload_model():
     try:
-        startup_event()
+        current_v = load_champion_model()
         return {
             "status": "success",
-            "message": "Nouveau modèle chargé en mémoire avec succès.",
+            "message": f"Modèle rechargé avec succès en mémoire : {current_v}",
+            "active_model": current_v,
         }
     except Exception as e:
         return {
@@ -591,8 +571,11 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     # ==========================================================
     start_time = time.time()
     try:
-        probabilities = model_pipeline.predict_proba(X)[:, 1]
-        predictions = (probabilities >= DECISION_THRESHOLD).astype(int)
+        if hasattr(model_pipeline, "hinsage") or hasattr(model_pipeline, "classifier"):
+            probabilities = model_pipeline.predict_proba(df)[:, 1]
+        else:
+            probabilities = model_pipeline.predict_proba(X)[:, 1]
+        predictions = (probabilities >= active_decision_threshold).astype(int)
     except Exception as ml_err:
         return {
             "status": "error",
