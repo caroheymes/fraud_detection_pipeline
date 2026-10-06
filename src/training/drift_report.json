@@ -1,46 +1,46 @@
 {
-    "current_date": "2020-09-06",
-    "reference_period": "2020-07-30 -> 2020-08-29",
-    "current_period": "2020-08-30 -> 2020-09-06",
-    "sample_size": 18063,
-    "reference_size": 83477,
+    "current_date": "2020-09-11",
+    "reference_period": "2020-08-04 -> 2020-09-03",
+    "current_period": "2020-09-04 -> 2020-09-11",
+    "sample_size": 16078,
+    "reference_size": 84203,
     "drift_detected": false,
     "mean_drift_ratio": 0.0,
     "drift_threshold": 0.33,
     "details": {
         "amt": {
             "drift_detected": false,
-            "metric_value": 0.016208442863522403,
+            "metric_value": 0.025430061576665785,
             "threshold": 0.1,
             "method": "Wasserstein distance (normed)"
         },
         "hour_sin": {
             "drift_detected": false,
-            "metric_value": 0.019827414167081104,
+            "metric_value": 0.004236558542350757,
             "threshold": 0.1,
             "method": "Wasserstein distance (normed)"
         },
         "hour_cos": {
             "drift_detected": false,
-            "metric_value": 0.00844161479759713,
+            "metric_value": 0.005671448901296114,
             "threshold": 0.1,
             "method": "Wasserstein distance (normed)"
         },
         "distance_achat": {
             "drift_detected": false,
-            "metric_value": 0.0050875173166579375,
+            "metric_value": 0.007019316672336125,
             "threshold": 0.1,
             "method": "Wasserstein distance (normed)"
         },
         "is_fraud": {
             "drift_detected": false,
-            "metric_value": 0.0022390416390564677,
+            "metric_value": 0.00861066795467372,
             "threshold": 0.1,
             "method": "Jensen-Shannon distance"
         },
         "gender": {
             "drift_detected": false,
-            "metric_value": 0.0020167516851839,
+            "metric_value": 0.004430701116611715,
             "threshold": 0.1,
             "method": "Jensen-Shannon distance"
         }
@@ -48,18 +48,18 @@
     "performance_audit": {
         "model_version": "fraud_detector_v32",
         "decision_threshold": 0.8222,
-        "sample_size": 18063,
-        "fraud_count": 84,
-        "f2_score": 0.6719817767653758,
-        "recall": 0.7023809523809523,
-        "precision": 0.5728155339805825,
-        "f1_score": 0.6310160427807486,
-        "pr_auc": 0.708722531741325,
+        "sample_size": 16078,
+        "fraud_count": 103,
+        "f2_score": 0.7005758157389635,
+        "recall": 0.7087378640776699,
+        "precision": 0.6697247706422018,
+        "f1_score": 0.6886792452830188,
+        "pr_auc": 0.7609522199840397,
         "confusion_matrix": {
-            "tn": 17935,
-            "fp": 44,
-            "fn": 25,
-            "tp": 59
+            "tn": 15939,
+            "fp": 36,
+            "fn": 30,
+            "tp": 73
         },
         "performance_degraded": false,
         "degradation_reasons": [],
