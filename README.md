@@ -74,32 +74,7 @@ La boucle automatique d'Airflow effectue quotidiennement les tâches suivantes :
 
 Le cycle de vie et le déploiement des modèles s'appuient sur une gouvernance stricte de type **Champion vs Challenger** via le [MLflow Model Registry](https://mlflow.org/) et la classe centrale [`MLflowQualityGate`](src/utils/mlflow_manager.py) :
 
-```
-                 ┌─────────────────────────────────────────┐
-                 │    Nouvel Entraînement / Réentraînement │
-                 │   (XGBoost, GNN HinSAGE, etc.)          │
-                 └───────────────────┬─────────────────────┘
-                                     │
-                                     ▼
-                 ┌─────────────────────────────────────────┐
-                 │ Calibration du Seuil τ sur Validation   │
-                 │ & Évaluation Complète sur Test Set      │
-                 └───────────────────┬─────────────────────┘
-                                     │
-                                     ▼
-                 ┌─────────────────────────────────────────┐
-                 │         Quality Gate MLOps              │
-                 │  Score_Candidat > Score_Champion ?      │
-                 └──────────────┬──────────────────┬───────┘
-                     OUI        │                  │ NON
-            ┌───────────────────┘                  └───────────────────┐
-            ▼                                                          ▼
-┌───────────────────────────────────────┐            ┌───────────────────────────────────┐
-│ 👑 Promotion Automatique              │            │ 🥊 Challenger Conservé            │
-│ • Alias '@champion' réassigné         │            │ • Version loggée dans MLflow      │
-│ • Signal Hot-Reload vers FastAPI      │            │ • Modèle Champion actuel conservé │
-└───────────────────────────────────────┘            └───────────────────────────────────┘
-```
+![Entraînement et promotion du model chamion](promotion.png)
 
 ### 1. Métriques Cibles d'Évaluation
 Lors de l'optimisation bayésienne (Optuna) ou de l'entraînement final, la métrique cible peut être spécifiée via l'argument `--metric-target` :
