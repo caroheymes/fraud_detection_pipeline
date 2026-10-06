@@ -151,11 +151,25 @@ def compute_shap_values(model_pipeline, X):
             predictor = model_pipeline.named_steps["model"]
             X_enc = preprocessor.transform(X)
             feature_names = list(preprocessor.get_feature_names_out())
-        elif hasattr(model_pipeline, "classifier"):
+        elif hasattr(model_pipeline, "ae_extractor"):
+            predictor = model_pipeline.classifier
+            X_enc = model_pipeline.ae_extractor.transform(X)
+            try:
+                feature_names = list(model_pipeline.get_feature_names_out())
+            except Exception:
+                feature_names = [f"feat_{i}" for i in range(X_enc.shape[1])]
+        elif hasattr(model_pipeline, "hinsage"):
             predictor = model_pipeline.classifier
             test_embeddings = model_pipeline.hinsage.transform(X)
             X_enc = model_pipeline._prepare_features(X, test_embeddings)
-            feature_names = list(model_pipeline.get_feature_names_out())
+            try:
+                feature_names = list(model_pipeline.get_feature_names_out())
+            except Exception:
+                feature_names = [f"feat_{i}" for i in range(X_enc.shape[1])]
+        elif hasattr(model_pipeline, "classifier"):
+            predictor = model_pipeline.classifier
+            X_enc = X
+            feature_names = list(X.columns)
         else:
             return [{} for _ in range(len(X))]
 
@@ -571,7 +585,11 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     # ==========================================================
     start_time = time.time()
     try:
-        if hasattr(model_pipeline, "hinsage") or hasattr(model_pipeline, "classifier"):
+        if (
+            hasattr(model_pipeline, "hinsage")
+            or hasattr(model_pipeline, "mu_loss_")
+            or hasattr(model_pipeline, "classifier")
+        ):
             probabilities = model_pipeline.predict_proba(df)[:, 1]
         else:
             probabilities = model_pipeline.predict_proba(X)[:, 1]

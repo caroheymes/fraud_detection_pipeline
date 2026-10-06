@@ -448,6 +448,21 @@ if target_merchant:
                 else:
                     X_enc_all.columns = [c.split("__")[-1] for c in X_enc_all.columns]
                     X_enc_all.index = df_tx_list_proc.index
+            elif hasattr(champion_model, "ae_extractor") and hasattr(
+                champion_model, "classifier"
+            ):
+                X_enc_arr = champion_model.ae_extractor.transform(df_tx_list_proc)
+                try:
+                    cols = list(champion_model.get_feature_names_out())
+                except Exception:
+                    cols = [f"feat_{i}" for i in range(X_enc_arr.shape[1])]
+                X_enc_all = pd.DataFrame(
+                    X_enc_arr, columns=cols, index=df_tx_list_proc.index
+                )
+                features_groups["Autoencodeur Anomalie & Latent"] = [
+                    c for c in cols if "ae_" in c
+                ]
+                predictor = champion_model.classifier
             elif hasattr(champion_model, "hinsage") and hasattr(
                 champion_model, "classifier"
             ):

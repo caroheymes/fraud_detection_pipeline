@@ -121,18 +121,37 @@ def main():
 
     # Définition de la fonction objectif d'Optuna
     def objective(trial):
-        # Espace de recherche hyperparamètres
+        # Espace de recherche hyperparamètres recalibré sur la zone optimale
         params = {
-            "n_estimators": trial.suggest_int("n_estimators", 50, 300, step=50),
-            "max_depth": trial.suggest_int("max_depth", 3, 10),
-            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
-            "scale_pos_weight": trial.suggest_float("scale_pos_weight", 1.0, 100.0),
-            "subsample": trial.suggest_float("subsample", 0.6, 1.0),
-            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
-            "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+            # 1. Profondeur augmentée & Apprentissage fin
+            "max_depth": trial.suggest_int("max_depth", 7, 12),
+            "n_estimators": trial.suggest_int("n_estimators", 180, 400, step=20),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.05, log=True),
+            # 2. Régularisation forte (Gamma & L2)
+            "gamma": trial.suggest_float("gamma", 3.0, 10.0, step=0.5),
+            "reg_alpha": trial.suggest_float("reg_alpha", 1e-5, 1.0, log=True),
+            "reg_lambda": trial.suggest_float("reg_lambda", 0.05, 5.0, log=True),
+            # 3. Paramètres consensuels validés
+            "scale_pos_weight": trial.suggest_float(
+                "scale_pos_weight", 5.0, 10.0, step=0.5
+            ),
+            "min_child_weight": trial.suggest_int("min_child_weight", 4, 8),
+            "colsample_bytree": trial.suggest_float(
+                "colsample_bytree", 0.70, 0.85, step=0.05
+            ),
+            "subsample": 1.0,
             "random_state": 42,
             "tree_method": "hist",
+            "eval_metric": "logloss",
         }
+
+        trial_start = datetime.now()
+        print(
+            f"⏳ [ESSAI {trial.number + 1}/{args.n_trials}] "
+            f"n_est={params['n_estimators']}, depth={params['max_depth']}, lr={params['learning_rate']:.3f}, scale_pos={params['scale_pos_weight']:.1f}, gamma={params['gamma']:.2f}...",
+            end="",
+            flush=True,
+        )
 
         # 5-Fold TimeSeriesSplit (Expanding Window)
         tscv = TimeSeriesSplit(n_splits=5)
@@ -171,7 +190,12 @@ def main():
             )
             scores.append(score)
 
-        return float(np.mean(scores)) if scores else 0.0
+        mean_score = float(np.mean(scores)) if scores else 0.0
+        elapsed = (datetime.now() - trial_start).total_seconds()
+        print(
+            f" -> Score {args.metric_target.upper()} = {mean_score:.4f} ({elapsed:.1f}s)"
+        )
+        return mean_score
 
     # Lancement du Run Parent dans MLflow
     parent_run_name = f"Optuna_XGBoost_{args.metric_target.upper()}_{datetime.now().strftime('%m%d_%H%M')}"
@@ -216,6 +240,7 @@ def main():
         best_params = study.best_params
         best_params["random_state"] = 42
         best_params["tree_method"] = "hist"
+        best_params["eval_metric"] = "logloss"
 
         # Sampling modéré sur l'ensemble du train
         if args.sampling_ratio > 0.0:

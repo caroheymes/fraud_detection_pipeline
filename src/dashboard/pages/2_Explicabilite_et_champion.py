@@ -40,8 +40,15 @@ def query_db(query):
 
 def get_hybrid_explain_sample():
     # 1. Charger l'historique de référence
-    df_ref = pd.read_csv("src/training/reference_data.csv")
-    df_ref["trans_date_trans_time"] = pd.to_datetime(df_ref["trans_date_trans_time"])
+    ref_path = "src/training/reference_data.csv"
+    if not os.path.exists(ref_path):
+        ref_path = os.path.join(project_root, "src/training/reference_data.csv")
+    df_ref = pd.read_csv(ref_path)
+    df_ref["trans_date_trans_time"] = pd.to_datetime(
+        df_ref["trans_date_trans_time"]
+    ).dt.tz_localize(None)
+    if "dob" in df_ref.columns:
+        df_ref["dob"] = pd.to_datetime(df_ref["dob"]).dt.tz_localize(None)
 
     # 2. Récupérer les données réelles des 30 derniers jours de PostgreSQL
     db_query = """
@@ -51,11 +58,12 @@ def get_hybrid_explain_sample():
     df_prod = query_db(db_query)
 
     if df_prod is not None and not df_prod.empty:
-        # Formater les colonnes temporelles
+        # Formater les colonnes temporelles en tz-naive pour compatibilité concat
         df_prod["trans_date_trans_time"] = pd.to_datetime(
             df_prod["trans_date_trans_time"]
-        )
-        df_prod["dob"] = pd.to_datetime(df_prod["dob"])
+        ).dt.tz_localize(None)
+        if "dob" in df_prod.columns:
+            df_prod["dob"] = pd.to_datetime(df_prod["dob"]).dt.tz_localize(None)
 
         # Calculer à la volée les variables requises par le modèle
         df_prod["age"] = (
@@ -140,6 +148,62 @@ def get_current_champion_version_key() -> str:
         return "fallback_run"
 
 
+def _extract_model_predictor_and_xenc(model, df_sample, X_samp, features_groups):
+    """Extrait le sous-prédicteur et la matrice X_enc selon l'architecture (Sklearn, Autoencoder, HinSAGE)."""
+    if hasattr(model, "named_steps"):
+        preprocessor = model.named_steps["preprocessor"]
+        predictor = model.named_steps["model"]
+        X_enc = preprocessor.transform(X_samp)
+
+        if hasattr(preprocessor, "get_feature_names_out"):
+            cols = [c.split("__")[-1] for c in preprocessor.get_feature_names_out()]
+        else:
+            cols = X_samp.columns.tolist()
+
+        if not isinstance(X_enc, pd.DataFrame):
+            X_enc = pd.DataFrame(X_enc, columns=cols)
+        else:
+            X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
+    elif hasattr(model, "ae_extractor") and hasattr(model, "classifier"):
+        X_enc_arr = model.ae_extractor.transform(df_sample)
+        try:
+            cols = list(model.get_feature_names_out())
+        except Exception:
+            cols = [f"feat_{i}" for i in range(X_enc_arr.shape[1])]
+        X_enc = pd.DataFrame(X_enc_arr, columns=cols)
+        features_groups["Autoencodeur Anomalie & Latent"] = [
+            c for c in cols if "ae_" in c
+        ]
+        preprocessor = model.ae_extractor
+        predictor = model.classifier
+    elif hasattr(model, "hinsage") and hasattr(model, "classifier"):
+        test_embeddings = model.hinsage.transform(df_sample)
+        raw_scaled = model.hinsage._extract_clean_features(df_sample, is_train=False)
+        X_enc_arr = np.hstack([test_embeddings, raw_scaled])
+        emb_cols = [f"Embedding GRL {i + 1}" for i in range(test_embeddings.shape[1])]
+        vec_cols = (
+            [
+                c.split("__")[-1]
+                for c in model.hinsage.vectorizer.get_feature_names_out()
+            ]
+            if hasattr(model.hinsage.vectorizer, "get_feature_names_out")
+            else [f"feat_{i}" for i in range(raw_scaled.shape[1])]
+        )
+        cols = emb_cols + vec_cols
+        X_enc = pd.DataFrame(X_enc_arr, columns=cols)
+        features_groups["Embeddings Réseau Graphe (HinSAGE)"] = emb_cols
+        preprocessor = model.hinsage.vectorizer
+        predictor = model.classifier
+    else:
+        preprocessor = None
+        predictor = getattr(model, "classifier", model)
+        X_enc = X_samp.copy()
+        cols = X_samp.columns.tolist()
+
+    X_enc.index = df_sample["trans_num"].tolist()
+    return predictor, preprocessor, X_enc
+
+
 # Cache dynamique pour le chargement de l'explicateur Shapash
 @st.cache_resource
 def load_shapash_explainer(version_key: str):
@@ -147,16 +211,19 @@ def load_shapash_explainer(version_key: str):
     champion_metrics = {}
     champion_params = {}
 
-    try:
-        import __main__
-        import src.training.inductive_grl as ig
-
-        __main__.InductiveGRLPipeline = ig.InductiveGRLPipeline
-        __main__.HinSAGERepresentationLearner = ig.HinSAGERepresentationLearner
-        __main__.HinSAGEPyTorchNet = ig.HinSAGEPyTorchNet
-        __main__.FocalLoss = ig.FocalLoss
-    except Exception:
-        pass
+    features_groups = {
+        "Heure": ["hour_sin", "hour_cos"],
+        "Jour de la semaine": ["weekday_sin", "weekday_cos"],
+        "Mois de l'année": ["month_sin", "month_cos"],
+    }
+    features_dict = {
+        "amt": "Montant (€)",
+        "distance_achat": "Distance d'achat (km)",
+        "age": "Âge du client",
+        "city_pop": "Population de la ville",
+        "category": "Catégorie d'achat",
+        "gender": "Genre",
+    }
 
     try:
         client = MlflowClient()
@@ -171,6 +238,7 @@ def load_shapash_explainer(version_key: str):
         champion_model, _, _ = load_champion_model()
         if champion_model is None:
             champion_model = mlflow.sklearn.load_model(f"runs:/{champion_run_id}/model")
+
         df_sample_resorted = get_hybrid_explain_sample()
 
         if "client_node" not in df_sample_resorted.columns:
@@ -197,65 +265,9 @@ def load_shapash_explainer(version_key: str):
         X_samp = df_sample_resorted[features_list]
         y_samp = df_sample_resorted["is_fraud"]
 
-        features_groups = {
-            "Heure": ["hour_sin", "hour_cos"],
-            "Jour de la semaine": ["weekday_sin", "weekday_cos"],
-            "Mois de l'année": ["month_sin", "month_cos"],
-        }
-        features_dict = {
-            "amt": "Montant (€)",
-            "distance_achat": "Distance d'achat (km)",
-            "age": "Âge du client",
-            "city_pop": "Population de la ville",
-            "category": "Catégorie d'achat",
-            "gender": "Genre",
-        }
-
-        if hasattr(champion_model, "named_steps"):
-            preprocessor = champion_model.named_steps["preprocessor"]
-            predictor = champion_model.named_steps["model"]
-            X_enc = preprocessor.transform(X_samp)
-
-            if hasattr(preprocessor, "get_feature_names_out"):
-                cols = [c.split("__")[-1] for c in preprocessor.get_feature_names_out()]
-            else:
-                cols = X_samp.columns.tolist()
-
-            if not isinstance(X_enc, pd.DataFrame):
-                X_enc = pd.DataFrame(X_enc, columns=cols)
-            else:
-                X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
-        elif hasattr(champion_model, "hinsage") and hasattr(
-            champion_model, "classifier"
-        ):
-            test_embeddings = champion_model.hinsage.transform(df_sample_resorted)
-            raw_scaled = champion_model.hinsage._extract_clean_features(
-                df_sample_resorted, is_train=False
-            )
-            X_enc_arr = np.hstack([test_embeddings, raw_scaled])
-            emb_cols = [
-                f"Embedding GRL {i + 1}" for i in range(test_embeddings.shape[1])
-            ]
-            vec_cols = (
-                [
-                    c.split("__")[-1]
-                    for c in champion_model.hinsage.vectorizer.get_feature_names_out()
-                ]
-                if hasattr(champion_model.hinsage.vectorizer, "get_feature_names_out")
-                else [f"feat_{i}" for i in range(raw_scaled.shape[1])]
-            )
-            cols = emb_cols + vec_cols
-            X_enc = pd.DataFrame(X_enc_arr, columns=cols)
-            features_groups["Embeddings Réseau Graphe (HinSAGE)"] = emb_cols
-            preprocessor = champion_model.hinsage.vectorizer
-            predictor = champion_model.classifier
-        else:
-            preprocessor = None
-            predictor = getattr(champion_model, "classifier", champion_model)
-            X_enc = X_samp
-            cols = X_samp.columns.tolist()
-
-        X_enc.index = df_sample_resorted["trans_num"].tolist()
+        predictor, preprocessor, X_enc = _extract_model_predictor_and_xenc(
+            champion_model, df_sample_resorted, X_samp, features_groups
+        )
         y_samp.index = X_enc.index
 
         xpl_obj = SmartExplainer(
@@ -276,7 +288,7 @@ def load_shapash_explainer(version_key: str):
         preprocessor_class = (
             getattr(preprocessor, "__class__", type(preprocessor)).__name__
             if preprocessor is not None
-            else "HinSAGE Embedder"
+            else "Standard"
         )
         run_name = getattr(champion_run.info, "run_name", "") or ""
         run_source = champion_run.data.tags.get("mlflow.source.name", "") or ""
@@ -330,12 +342,21 @@ def load_shapash_explainer(version_key: str):
                 champion_run_id = latest_run.info.run_id
                 champion_metrics = latest_run.data.metrics
                 champion_params = latest_run.data.params
-                champion_model = mlflow.sklearn.load_model(
-                    f"runs:/{champion_run_id}/model"
-                )
+                champion_model, _, _ = load_champion_model()
+                if champion_model is None:
+                    champion_model = mlflow.sklearn.load_model(
+                        f"runs:/{champion_run_id}/model"
+                    )
 
-                preprocessor = champion_model.named_steps["preprocessor"]
-                predictor = champion_model.named_steps["model"]
+                df_sample_resorted = get_hybrid_explain_sample()
+                if "client_node" not in df_sample_resorted.columns:
+                    df_sample_resorted["client_node"] = df_sample_resorted[
+                        "cc_num"
+                    ].astype(str)
+                if "merchant_node" not in df_sample_resorted.columns:
+                    df_sample_resorted["merchant_node"] = df_sample_resorted[
+                        "merchant"
+                    ].astype(str)
 
                 features_list = [
                     "category",
@@ -351,40 +372,14 @@ def load_shapash_explainer(version_key: str):
                     "month_sin",
                     "month_cos",
                 ]
-                df_sample_resorted = get_hybrid_explain_sample()
-
                 X_samp = df_sample_resorted[features_list]
                 y_samp = df_sample_resorted["is_fraud"]
-                X_enc = preprocessor.transform(X_samp)
 
-                # Garantir que X_enc est un DataFrame avec des noms de colonnes valides
-                if hasattr(preprocessor, "get_feature_names_out"):
-                    cols = [
-                        c.split("__")[-1] for c in preprocessor.get_feature_names_out()
-                    ]
-                else:
-                    cols = X_samp.columns.tolist()
-
-                if not isinstance(X_enc, pd.DataFrame):
-                    X_enc = pd.DataFrame(X_enc, columns=cols)
-                else:
-                    X_enc.columns = [c.split("__")[-1] for c in X_enc.columns]
-                X_enc.index = df_sample_resorted["trans_num"].tolist()
+                predictor, preprocessor, X_enc = _extract_model_predictor_and_xenc(
+                    champion_model, df_sample_resorted, X_samp, features_groups
+                )
                 y_samp.index = X_enc.index
 
-                features_groups = {
-                    "Heure": ["hour_sin", "hour_cos"],
-                    "Jour de la semaine": ["weekday_sin", "weekday_cos"],
-                    "Mois de l'année": ["month_sin", "month_cos"],
-                }
-                features_dict = {
-                    "amt": "Montant (€)",
-                    "distance_achat": "Distance d'achat (km)",
-                    "age": "Âge du client",
-                    "city_pop": "Population de la ville",
-                    "category": "Catégorie d'achat",
-                    "gender": "Genre",
-                }
                 xpl_obj = SmartExplainer(
                     model=predictor,
                     features_groups=features_groups,
@@ -428,7 +423,7 @@ def load_shapash_explainer(version_key: str):
             st.error(
                 f"Erreur critique lors de l'initialisation Shapash de secours : {final_err}"
             )
-            return None, None, None, None, None, None
+            return None, None, None, {}, {}, {}
 
 
 with st.spinner("Chargement du modèle champion et calcul des contributions SHAP..."):

@@ -168,6 +168,24 @@ class MLflowQualityGate:
         Retourne :
             (is_promoted: bool, target_version: str)
         """
+        # 0. Gestion explicite du Run MLflow actif ou création d'un Run nommé explicite
+        from datetime import datetime
+
+        active_run = mlflow.active_run()
+        created_local_run = False
+        if active_run is None:
+            model_type_str = (
+                params.get("model_type")
+                or (tags.get("model_type") if tags else None)
+                or self.model_name
+            )
+            explicit_name = f"Champion_Candidate_{model_type_str}_{self.metric_target.upper()}_{datetime.now().strftime('%m%d_%H%M%S')}"
+            mlflow.start_run(run_name=explicit_name)
+            created_local_run = True
+        else:
+            if tags and "model_type" in tags:
+                mlflow.set_tag("model_type", tags["model_type"])
+
         # 1. Logging des paramètres, métriques et tags
         if params is None:
             params = {}
@@ -290,10 +308,13 @@ class MLflowQualityGate:
             print(
                 f"\n⛔ MODÈLE NON PROMU : Score candidat ({candidate_score:.4f}) <= Score de référence ({reference_score:.4f})."
             )
-            print(f"   👉 Le modèle Version {target_version} reste comme Challenger.")
-            print(
-                f"   👉 L'alias '@champion' est maintenu sur la Version {champion_info['version']}."
-            )
+            if champion_info:
+                print(
+                    f"   👉 L'alias '@champion' est maintenu sur la Version {champion_info['version']}."
+                )
+
+        if created_local_run:
+            mlflow.end_run()
 
         return should_promote, target_version
 
@@ -396,11 +417,38 @@ def load_champion_model(
     mlflow.set_tracking_uri(tracking_uri)
     client = MlflowClient(tracking_uri=tracking_uri)
 
-    # Import conditionnel pour compatibilité des architectures personnalisées lors de la désérialisation
-    try:
-        import src.training.inductive_grl  # noqa: F401
-    except ImportError:
-        pass
+    # Bridge de compatibilité pickle pour les modèles sauvegardés sous __main__
+    import builtins
+    import sys
+
+    main_mod = sys.modules.get("__main__")
+
+    for mod_name, class_names in [
+        (
+            "src.training.inductive_grl",
+            [
+                "InductiveGRLPipeline",
+                "HinSAGEPyTorchNet",
+                "HinSAGERepresentationLearner",
+                "FocalLoss",
+            ],
+        ),
+        ("src.training.autoencoder", ["AutoencoderFraudDetector", "AutoencoderNet"]),
+        (
+            "src.training.autoencoder_xgb",
+            ["AutoencoderXGBoostPipeline", "AutoencoderFeatureLearner"],
+        ),
+    ]:
+        try:
+            mod = __import__(mod_name, fromlist=class_names)
+            for cls_name in class_names:
+                if hasattr(mod, cls_name):
+                    cls_obj = getattr(mod, cls_name)
+                    if main_mod is not None:
+                        setattr(main_mod, cls_name, cls_obj)
+                    setattr(builtins, cls_name, cls_obj)
+        except ImportError:
+            pass
 
     try:
         model_uri = f"models:/{model_name}@{alias}"

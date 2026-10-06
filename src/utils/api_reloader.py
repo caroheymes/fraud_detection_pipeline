@@ -48,3 +48,7 @@ def reload_serving_api(custom_url: str | None = None, timeout: int = 5) -> bool:
         "ℹ️ L'API d'inférence n'a pas répondu ou n'est pas active sur les ports configurés."
     )
     return False
+
+
+# Alias pour rétrocompatibilité et flexibilité
+trigger_api_reload = reload_serving_api

@@ -1,50 +1,74 @@
 {
-    "current_date": "2020-08-05",
-    "reference_period": "2020-06-28 -> 2020-07-28",
-    "current_period": "2020-07-29 -> 2020-08-05",
-    "sample_size": 19793,
-    "reference_size": 87693,
+    "current_date": "2020-09-06",
+    "reference_period": "2020-07-30 -> 2020-08-29",
+    "current_period": "2020-08-30 -> 2020-09-06",
+    "sample_size": 18063,
+    "reference_size": 83477,
     "drift_detected": false,
     "mean_drift_ratio": 0.0,
     "drift_threshold": 0.33,
     "details": {
         "amt": {
             "drift_detected": false,
-            "metric_value": 0.015582308885075993,
+            "metric_value": 0.016208442863522403,
             "threshold": 0.1,
             "method": "Wasserstein distance (normed)"
         },
         "hour_sin": {
             "drift_detected": false,
-            "metric_value": 0.006820946337186608,
+            "metric_value": 0.019827414167081104,
             "threshold": 0.1,
             "method": "Wasserstein distance (normed)"
         },
         "hour_cos": {
             "drift_detected": false,
-            "metric_value": 0.009042016034911872,
+            "metric_value": 0.00844161479759713,
             "threshold": 0.1,
             "method": "Wasserstein distance (normed)"
         },
         "distance_achat": {
             "drift_detected": false,
-            "metric_value": 0.008593441374452426,
+            "metric_value": 0.0050875173166579375,
             "threshold": 0.1,
             "method": "Wasserstein distance (normed)"
         },
         "is_fraud": {
             "drift_detected": false,
-            "metric_value": 0.004837977211656136,
+            "metric_value": 0.0022390416390564677,
             "threshold": 0.1,
             "method": "Jensen-Shannon distance"
         },
         "gender": {
             "drift_detected": false,
-            "metric_value": 0.0005567495011189814,
+            "metric_value": 0.0020167516851839,
             "threshold": 0.1,
             "method": "Jensen-Shannon distance"
         }
     },
-    "performance_audit": {},
+    "performance_audit": {
+        "model_version": "fraud_detector_v32",
+        "decision_threshold": 0.8222,
+        "sample_size": 18063,
+        "fraud_count": 84,
+        "f2_score": 0.6719817767653758,
+        "recall": 0.7023809523809523,
+        "precision": 0.5728155339805825,
+        "f1_score": 0.6310160427807486,
+        "pr_auc": 0.708722531741325,
+        "confusion_matrix": {
+            "tn": 17935,
+            "fp": 44,
+            "fn": 25,
+            "tp": 59
+        },
+        "performance_degraded": false,
+        "degradation_reasons": [],
+        "thresholds": {
+            "min_f2": 0.5,
+            "min_recall": 0.5,
+            "min_precision": 0.2,
+            "min_f1": 0.5
+        }
+    },
     "should_retrain": false
 }

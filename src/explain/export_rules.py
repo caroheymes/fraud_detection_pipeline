@@ -84,7 +84,16 @@ if hasattr(model, "named_steps"):
     except Exception:
         col_names = [f"feat_{i}" for i in range(X_trans.shape[1])]
     X_encoded = pd.DataFrame(X_trans, columns=col_names, index=df_sample.index)
-else:
+elif hasattr(model, "ae_extractor"):
+    # Pipeline Hybride Auto-encodeur + XGBoost
+    X_features_arr = model.ae_extractor.transform(df_sample)
+    predictor = model.classifier
+    try:
+        col_names = model.get_feature_names_out()
+    except Exception:
+        col_names = [f"feat_{i}" for i in range(X_features_arr.shape[1])]
+    X_encoded = pd.DataFrame(X_features_arr, columns=col_names, index=df_sample.index)
+elif hasattr(model, "hinsage"):
     # Pipeline Inductive GRL (HinSAGE + XGBoost)
     test_embeddings = model.hinsage.transform(df_sample)
     X_features_arr = model._prepare_features(df_sample, test_embeddings)
@@ -94,6 +103,32 @@ else:
     except Exception:
         col_names = [f"feat_{i}" for i in range(X_features_arr.shape[1])]
     X_encoded = pd.DataFrame(X_features_arr, columns=col_names, index=df_sample.index)
+else:
+    # Modèle générique avec classifier interne ou direct
+    if hasattr(model, "classifier"):
+        predictor = model.classifier
+    else:
+        predictor = model
+    try:
+        X_trans = model.transform(df_sample)
+        col_names = [f"feat_{i}" for i in range(X_trans.shape[1])]
+        X_encoded = pd.DataFrame(X_trans, columns=col_names, index=df_sample.index)
+    except Exception:
+        features = [
+            "category",
+            "amt",
+            "gender",
+            "distance_achat",
+            "age",
+            "city_pop",
+            "hour_sin",
+            "hour_cos",
+            "weekday_sin",
+            "weekday_cos",
+            "month_sin",
+            "month_cos",
+        ]
+        X_encoded = df_sample[[c for c in features if c in df_sample.columns]]
 
 # ==========================================================
 # 3. CALCUL SHAPASH
