@@ -46,7 +46,7 @@ def ingest_data_from_queue(ti):
     if not os.path.exists(queue_dir):
         raise FileNotFoundError(f"Le répertoire {queue_dir} n'existe pas.")
 
-    batch_size = 100
+    batch_size = 500
     filenames = []
 
     with os.scandir(queue_dir) as it:
@@ -104,13 +104,13 @@ def ingest_data_from_queue(ti):
             ]
             conn.execute(insert_query, params)
 
-        logger.info(f"🟢 Ingestion of {len(filenames)} files successfully registered!")
+        logger.info(f" Ingestion of {len(filenames)} files successfully registered!")
         batch_info_path = os.path.join(OUTPUT_DIR, "current_batch.json")
         with open(batch_info_path, "w") as f:
             json.dump(filenames, f)
     except Exception as e:
         logger.error(
-            f"❌ Erreur lors de l'insertion dans la table silver.ingested_file : {e}"
+            f" Erreur lors de l'insertion dans la table silver.ingested_file : {e}"
         )
         raise
     finally:
@@ -195,6 +195,10 @@ def trigger_batch_prediction(ti):
     r = requests.post(submit_url, json=data_payload, timeout=60)
     r.raise_for_status()
     result = r.json()
+    if result.get("status") == "error":
+        raise RuntimeError(
+            f"Erreur retournée par l'API /predict_batch : {result.get('message')}"
+        )
     logger.info(f"Prédictions API reçues avec succès (status: {result.get('status')})")
 
 

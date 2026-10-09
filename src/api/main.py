@@ -25,7 +25,11 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from src.utils.db import get_postgres_engine, get_redis_client
-from src.utils.features import haversine_vectorized
+from src.utils.features import (
+    BASE_FEATURE_COLUMNS,
+    compute_user_hash,
+    haversine_vectorized,
+)
 from src.utils.mlflow_manager import load_champion_model as fetch_champion_model
 
 # --- 1. CONFIGURATION POSTGRESQL & REDIS VIA SRC.UTILS.DB ---
@@ -35,6 +39,32 @@ if redis_client is not None:
     print("Connexion globale à Redis pour l'API initialisée.")
 else:
     print("Avertissement : Connexion à Redis impossible pour l'API.")
+
+
+def get_and_increment_user_velocity(
+    user_hash: str,
+    tx_date_str: str,
+    redis_conn=None,
+    ttl_seconds: int = 172800,  # 48h TTL (RGPD / Rétention éphémère)
+) -> int:
+    """
+    Incrémente atomiquement et retourne le nombre d'achats réalisés aujourd'hui par l'utilisateur (Redis).
+    Garantit une latence < 1ms et applique un TTL automatique pour conformité RGPD.
+    En cas d'indisponibilité ou d'erreur Redis, retourne 1 par défaut (fallback résilient).
+    """
+    if redis_conn is None:
+        return 1
+    key = f"velocity:user:{user_hash}:{tx_date_str}"
+    try:
+        pipe = redis_conn.pipeline()
+        pipe.incr(key)
+        pipe.expire(key, ttl_seconds)
+        res = pipe.execute()
+        return int(res[0])
+    except Exception as err:
+        print(f"[Redis Velocity Engine] Erreur INCR pour {key} : {err}")
+        return 1
+
 
 # --- 2. CONFIGURATION DE L'APPLICATION FASTAPI ---
 active_decision_threshold: float = 0.50
@@ -146,6 +176,8 @@ DECISION_THRESHOLD = float(os.getenv("DECISION_THRESHOLD", "0.50"))
 # --- 4.5. CALCUL SHAP EN TEMPS RÉEL (EXPLICABILITÉ) ---
 def compute_shap_values(model_pipeline, X):
     try:
+        import xgboost as xgb
+
         if hasattr(model_pipeline, "named_steps"):
             preprocessor = model_pipeline.named_steps["preprocessor"]
             predictor = model_pipeline.named_steps["model"]
@@ -166,6 +198,20 @@ def compute_shap_values(model_pipeline, X):
                 feature_names = list(model_pipeline.get_feature_names_out())
             except Exception:
                 feature_names = [f"feat_{i}" for i in range(X_enc.shape[1])]
+        elif hasattr(model_pipeline, "iso_forest") or hasattr(
+            model_pipeline, "transform"
+        ):
+            present_cols = [c for c in BASE_FEATURE_COLUMNS if c in X.columns]
+            X_enc = model_pipeline.transform(X[present_cols])
+            try:
+                feature_names = list(model_pipeline.get_feature_names_out())
+            except Exception:
+                feature_names = [f"feat_{i}" for i in range(X_enc.shape[1])]
+            predictor = getattr(
+                model_pipeline,
+                "classifier",
+                getattr(model_pipeline, "xgb_model", model_pipeline),
+            )
         elif hasattr(model_pipeline, "classifier"):
             predictor = model_pipeline.classifier
             X_enc = X
@@ -173,41 +219,39 @@ def compute_shap_values(model_pipeline, X):
         else:
             return [{} for _ in range(len(X))]
 
-        # Convertir en DataFrame pour l'explication si c'est un tableau numpy
-        if not isinstance(X_enc, pd.DataFrame):
-            X_enc_df = pd.DataFrame(X_enc, columns=feature_names)
+        # Utiliser l'arbre XGBoost natif si disponible (ultra-rapide et robuste)
+        if hasattr(predictor, "get_booster"):
+            booster = predictor.get_booster()
+            dmat = xgb.DMatrix(X_enc, feature_names=feature_names)
+            raw_shap = booster.predict(dmat, pred_contribs=True)
+            if raw_shap.shape[1] == len(feature_names) + 1:
+                raw_shap = raw_shap[:, :-1]
         else:
-            X_enc_df = X_enc
-
-        # Explainer Tree SHAP
-        explainer = shap.TreeExplainer(predictor)
-        raw_shap = explainer.shap_values(X_enc_df)
-
-        # Adapter la dimension des SHAP values selon le format retourné
-        if isinstance(raw_shap, list):
-            if len(raw_shap) == 2:
-                raw_shap = raw_shap[1]
+            # Convertir en DataFrame pour l'explication si c'est un tableau numpy
+            if not isinstance(X_enc, pd.DataFrame):
+                X_enc_df = pd.DataFrame(X_enc, columns=feature_names)
             else:
-                raw_shap = raw_shap[0]
-        elif len(raw_shap.shape) == 3:
-            raw_shap = raw_shap[:, :, 1]
+                X_enc_df = X_enc
+
+            # Explainer Tree SHAP
+            explainer = shap.TreeExplainer(predictor)
+            raw_shap = explainer.shap_values(X_enc_df)
+
+            # Adapter la dimension des SHAP values selon le format retourné
+            if isinstance(raw_shap, list):
+                if len(raw_shap) == 2:
+                    raw_shap = raw_shap[1]
+                else:
+                    raw_shap = raw_shap[0]
+            elif len(raw_shap.shape) == 3:
+                raw_shap = raw_shap[:, :, 1]
 
         # Extraire les features d'intérêt pour chaque ligne
         shap_dicts = []
+        shap_cols = [c for c in BASE_FEATURE_COLUMNS if c not in ["category", "gender"]]
         for i in range(len(X)):
             row_dict = {}
-            for col in [
-                "amt",
-                "distance_achat",
-                "age",
-                "city_pop",
-                "hour_sin",
-                "hour_cos",
-                "weekday_sin",
-                "weekday_cos",
-                "month_sin",
-                "month_cos",
-            ]:
+            for col in shap_cols:
                 if col in feature_names:
                     idx = feature_names.index(col)
                     val = raw_shap[i, idx]
@@ -233,19 +277,32 @@ def save_predictions_to_db(
     fast_pass_scores: list,
     prediction_latency_ms: float,
     shap_values_list: list,
+    user_daily_tx_counts: list | None = None,
+    user_hashes: list | None = None,
 ):
     query = text("""
         INSERT INTO silver.rawdata (
             trans_date_trans_time, cc_num, merchant, category, amt, first, last, gender,
             street, city, state, zip, lat, long, city_pop, job, dob, trans_num,
             unix_time, merch_lat, merch_long, is_fraud, prediction, prediction_proba, model_version,
-            fast_pass_suspicion, fast_pass_score, prediction_latency_ms, shap_values
+            fast_pass_suspicion, fast_pass_score, prediction_latency_ms, shap_values,
+            user_daily_tx_count, user_hash
         ) VALUES (
             :trans_date_trans_time, :cc_num, :merchant, :category, :amt, :first, :last, :gender,
             :street, :city, :state, :zip, :lat, :long, :city_pop, :job, :dob, :trans_num,
             :unix_time, :merch_lat, :merch_long, :is_fraud, :prediction, :prediction_proba, :model_version,
-            :fast_pass_suspicion, :fast_pass_score, :prediction_latency_ms, :shap_values
-        ) ON CONFLICT (trans_num) DO NOTHING;
+            :fast_pass_suspicion, :fast_pass_score, :prediction_latency_ms, :shap_values,
+            :user_daily_tx_count, :user_hash
+        ) ON CONFLICT (trans_num) DO UPDATE SET
+            prediction = EXCLUDED.prediction,
+            prediction_proba = EXCLUDED.prediction_proba,
+            model_version = EXCLUDED.model_version,
+            fast_pass_suspicion = EXCLUDED.fast_pass_suspicion,
+            fast_pass_score = EXCLUDED.fast_pass_score,
+            prediction_latency_ms = EXCLUDED.prediction_latency_ms,
+            shap_values = EXCLUDED.shap_values,
+            user_daily_tx_count = EXCLUDED.user_daily_tx_count,
+            user_hash = EXCLUDED.user_hash;
     """)
 
     params_list = []
@@ -260,6 +317,10 @@ def save_predictions_to_db(
         t_param["shap_values"] = (
             json.dumps(shap_values_list[i]) if shap_values_list[i] is not None else None
         )
+        t_param["user_daily_tx_count"] = (
+            int(user_daily_tx_counts[i]) if user_daily_tx_counts else 1
+        )
+        t_param["user_hash"] = str(user_hashes[i]) if user_hashes else None
         params_list.append(t_param)
 
     try:
@@ -267,7 +328,7 @@ def save_predictions_to_db(
             conn.execute(query, params_list)
             conn.commit()
         print(
-            f"[Postgres MLOps] Ingestion réussie pour {len(transactions_list)} transactions (XGBoost + Fast Pass + SHAP + Latency)."
+            f"[Postgres MLOps] Ingestion réussie pour {len(transactions_list)} transactions (XGBoost + Fast Pass + SHAP + Velocity)."
         )
     except Exception as e:
         print(f"[Postgres MLOps] Erreur d'écriture dans la base : {e}")
@@ -343,17 +404,21 @@ def init_postgres_schema():
                     fast_pass_score INT,
                     prediction_latency_ms NUMERIC(10, 4),
                     shap_values JSONB,
+                    user_daily_tx_count INT DEFAULT 1,
+                    user_hash VARCHAR(64),
                     logged_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
             """)
             )
 
-            # Colonnes d'observabilité
+            # Colonnes d'observabilité et vélocité
             for col_sql in [
                 "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS prediction_latency_ms NUMERIC(10, 4);",
                 "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS shap_values JSONB;",
                 "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_suspicion INT DEFAULT 0;",
                 "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS fast_pass_score INT DEFAULT 0;",
+                "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS user_daily_tx_count INT DEFAULT 1;",
+                "ALTER TABLE silver.rawdata ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64);",
             ]:
                 try:
                     conn.execute(text(col_sql))
@@ -387,7 +452,7 @@ async def auto_sync_champion_loop(check_interval_seconds: int = 10):
     """Tâche d'arrière-plan surveillant automatiquement les promotions dans MLflow."""
     global model_run_id
     print(
-        f"[MLOps Auto-Sync] 🔄 Boucle de synchronisation automatique activée ({check_interval_seconds}s intervalle)."
+        f"[MLOps Auto-Sync]  Boucle de synchronisation automatique activée ({check_interval_seconds}s intervalle)."
     )
     import asyncio
 
@@ -404,7 +469,7 @@ async def auto_sync_champion_loop(check_interval_seconds: int = 10):
 
             if model_run_id != target_id:
                 print(
-                    f"[MLOps Auto-Sync] 🔔 Nouvelle version Champion détectée dans MLflow : {target_id} (actuelle en RAM: {model_run_id}). Rechargement automatique..."
+                    f"[MLOps Auto-Sync]  Nouvelle version Champion détectée dans MLflow : {target_id} (actuelle en RAM: {model_run_id}). Rechargement automatique..."
                 )
                 load_champion_model()
         except Exception:
@@ -481,7 +546,7 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     transactions_list = [t.dict() for t in batch.transactions]
     df = pd.DataFrame(transactions_list)
 
-    # 2. Feature Engineering
+    # 2. Feature Engineering & Vélocité Utilisateur (Redis)
     df["trans_date_trans_time"] = pd.to_datetime(df["trans_date_trans_time"])
 
     df["hour_sin"] = np.sin(2 * np.pi * df["trans_date_trans_time"].dt.hour / 24.0)
@@ -500,23 +565,42 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
     )
 
     dob_col = pd.to_datetime(df["dob"])
-    df["age"] = 2020 - dob_col.dt.year
+    df["age"] = df["trans_date_trans_time"].dt.year - dob_col.dt.year
 
-    # 3. Sélection des variables pour le Pipeline ML
-    features = [
-        "category",
-        "amt",
-        "gender",
-        "distance_achat",
-        "age",
-        "city_pop",
-        "hour_sin",
-        "hour_cos",
-        "weekday_sin",
-        "weekday_cos",
-        "month_sin",
-        "month_cos",
-    ]
+    # Hash utilisateur cryptographique HMAC-SHA256 (RGPD / PCI-DSS)
+    user_hashes = compute_user_hash(df["first"], df["last"], df["dob"])
+    df["user_hash"] = user_hashes
+
+    # Vélocité d'achats journalière en temps réel via Redis (Online Feature Store)
+    velocity_counts = []
+    for u_h, dt_val in zip(df["user_hash"], df["trans_date_trans_time"]):
+        dt_str = dt_val.strftime("%Y-%m-%d")
+        count = get_and_increment_user_velocity(u_h, dt_str, redis_client)
+        velocity_counts.append(count)
+    df["user_daily_tx_count"] = velocity_counts
+
+    # 3. Sélection des variables pour le Pipeline ML (socle standardisé transverse)
+    if hasattr(model_pipeline, "feature_names_in_"):
+        features = [c for c in model_pipeline.feature_names_in_ if c in df.columns]
+    elif (
+        hasattr(model_pipeline, "named_steps")
+        and "preprocessor" in model_pipeline.named_steps
+        and hasattr(model_pipeline.named_steps["preprocessor"], "feature_names_in_")
+    ):
+        features = [
+            c
+            for c in model_pipeline.named_steps["preprocessor"].feature_names_in_
+            if c in df.columns
+        ]
+    elif hasattr(model_pipeline, "vectorizer") and hasattr(
+        model_pipeline.vectorizer, "feature_names_in_"
+    ):
+        features = [
+            c for c in model_pipeline.vectorizer.feature_names_in_ if c in df.columns
+        ]
+    else:
+        features = [c for c in BASE_FEATURE_COLUMNS if c in df.columns]
+
     X = df[features]
 
     # ==========================================================
@@ -556,6 +640,7 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
             category = str(row["category"])
             hour = int(row["trans_date_trans_time"].hour)
             weekday = int(row["trans_date_trans_time"].dayofweek)
+            user_tx_count = int(row["user_daily_tx_count"])
 
             # Évaluation du score
             if amt > thresholds.get("amt_max", 300.0):
@@ -572,6 +657,9 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
                 score += 1
             if city_pop > thresholds.get("city_pop_max", 3600.0):
                 score += 1
+            # Règle de vélocité répétée (rafale de transactions d'un même client)
+            if user_tx_count >= thresholds.get("user_daily_tx_count_max", 3):
+                score += 2
 
             # Seuil de déclenchement suspicion Fast Pass
             if score >= 4:
@@ -581,23 +669,22 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
         fast_pass_scores.append(score)
 
     # ==========================================================
-    # 5. INFÉRENCE SYSTÉMATIQUE XGBOOST AVEC LATENCE
+    # 5. INFÉRENCE SYSTÉMATIQUE AVEC LATENCE
     # ==========================================================
     start_time = time.time()
     try:
-        if (
-            hasattr(model_pipeline, "hinsage")
-            or hasattr(model_pipeline, "mu_loss_")
-            or hasattr(model_pipeline, "classifier")
-        ):
+        if hasattr(model_pipeline, "hinsage"):
             probabilities = model_pipeline.predict_proba(df)[:, 1]
         else:
-            probabilities = model_pipeline.predict_proba(X)[:, 1]
+            try:
+                probabilities = model_pipeline.predict_proba(X)[:, 1]
+            except Exception:
+                probabilities = model_pipeline.predict_proba(df)[:, 1]
         predictions = (probabilities >= active_decision_threshold).astype(int)
     except Exception as ml_err:
         return {
             "status": "error",
-            "message": f"Erreur pendant l'inférence XGBoost : {ml_err}",
+            "message": f"Erreur pendant l'inférence : {ml_err}",
         }
     end_time = time.time()
     prediction_latency_ms = ((end_time - start_time) * 1000.0) / max(1, len(df))
@@ -630,6 +717,8 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
         fast_pass_scores,
         prediction_latency_ms,
         shap_values_list,
+        list(df["user_daily_tx_count"]),
+        list(df["user_hash"]),
     )
 
     # 6.5. ENVOI DES WEBHOOKS POUR LES TRANSACTIONS FRAUDULEUSES
@@ -653,6 +742,7 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
                 "prediction_proba": float(probabilities[i]),
                 "fast_pass_suspicion": int(fast_pass_suspicions[i]),
                 "fast_pass_score": int(fast_pass_scores[i]),
+                "user_daily_tx_count": int(df["user_daily_tx_count"].iloc[i]),
                 "model_version": model_run_id,
             }
         )

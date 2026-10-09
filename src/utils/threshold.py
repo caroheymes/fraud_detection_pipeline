@@ -13,6 +13,7 @@ import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
+    brier_score_loss,
     confusion_matrix,
     f1_score,
     fbeta_score,
@@ -67,6 +68,10 @@ def find_optimal_threshold(
     eps = 1e-10
 
     metric = metric_target.lower()
+
+    if metric in ["brier", "brier_score"]:
+        bs = brier_score_loss(y_true_np, y_probas_np)
+        return 0.50, round(float(bs), 4)
 
     if metric in ["f2", "f2_score"]:
         b = 2.0
@@ -156,6 +161,11 @@ def evaluate_predictions_and_curves(
     except Exception:
         roc_auc = 0.0
 
+    try:
+        brier = float(brier_score_loss(y_true_np, y_probas_np))
+    except Exception:
+        brier = 0.0
+
     # 2. Prédictions binaires au seuil calibré
     y_pred = (y_probas_np >= threshold).astype(int)
 
@@ -173,6 +183,7 @@ def evaluate_predictions_and_curves(
         "pr_auc": auprc,
         "auprc": auprc,
         "roc_auc": roc_auc,
+        "brier_score": brier,
         "accuracy": acc,
         "prec_class_1": prec_c1,
         "rec_class_1": rec_c1,

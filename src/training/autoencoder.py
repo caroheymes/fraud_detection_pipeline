@@ -24,7 +24,7 @@ from sklearn.preprocessing import StandardScaler
 from skrub import TableVectorizer
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.utils.features import prepare_features
+from src.utils.features import BASE_FEATURE_COLUMNS, prepare_features
 
 
 class AutoencoderNet(nn.Module):
@@ -112,21 +112,7 @@ class AutoencoderFraudDetector(BaseEstimator, ClassifierMixin):
     def _extract_clean_features(
         self, df_prepared: pd.DataFrame, is_train: bool = True
     ) -> np.ndarray:
-        candidate_cols = [
-            "category",
-            "amt",
-            "gender",
-            "distance_achat",
-            "age",
-            "city_pop",
-            "hour_sin",
-            "hour_cos",
-            "weekday_sin",
-            "weekday_cos",
-            "month_sin",
-            "month_cos",
-        ]
-        present_cols = [c for c in candidate_cols if c in df_prepared.columns]
+        present_cols = [c for c in BASE_FEATURE_COLUMNS if c in df_prepared.columns]
         raw_feats = df_prepared[present_cols]
 
         if is_train:

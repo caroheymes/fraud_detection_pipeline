@@ -2,12 +2,13 @@
 """
 Dispatcher dynamique de réentraînement MLOps :
 1. Interroge MLflow pour identifier l'architecture et les métriques du Champion actuel (@champion).
-2. Déclenche le pipeline d'entraînement correspondant (HinSAGE+XGBoost ou XGBoost pur).
+2. Déclenche le pipeline d'entraînement correspondant (HinSAGE+XGBoost, IsolationForest+XGBoost ou XGBoost pur).
 3. Soumet le nouveau candidat au Quality Gate de promotion.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -32,38 +33,81 @@ def get_champion_architecture() -> tuple[str, str]:
         ).lower()
 
         print("=" * 70)
-        print("🔍 INSPECTION DU MODÈLE CHAMPION DANS MLFLOW")
-        print("  • Modèle        : fraud_detector")
-        print(f"  • Version       : {champ.version}")
-        print(f"  • Type          : {model_type or 'Inductive GRL (par défaut)'}")
-        print(f"  • Métrique cible: {target_metric.upper()}")
+        print("[INFO] INSPECTION DU MODELE CHAMPION DANS MLFLOW")
+        print("  - Modele        : fraud_detector")
+        print(f"  - Version       : {champ.version}")
+        print(f"  - Type          : {model_type or 'Inductive GRL (par defaut)'}")
+        print(f"  - Metrique cible: {target_metric.upper()}")
         print("=" * 70)
         return model_type, target_metric
     except Exception as e:
-        print(f"ℹ️ Aucun alias @champion trouvé ou connexion MLflow indisponible ({e}).")
-        print("👉 Basculement sur l'architecture par défaut : Inductive GRL (F2).")
+        print(
+            f"[INFO] Aucun alias @champion trouve ou connexion MLflow indisponible ({e})."
+        )
+        print("[INFO] Basculement sur l'architecture par defaut : Inductive GRL (F2).")
         return "inductive_grl", "f2"
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Dispatcher dynamique de reentrainement MLOps du Champion"
+    )
+    parser.add_argument(
+        "--n-trials",
+        type=int,
+        default=50,
+        help="Nombre de trials Optuna pour l'optimisation HPO (defaut: 50)",
+    )
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=100000,
+        help="Nombre de transactions pour l'entrainement (defaut: 100000 transactions recentes, -1 = tout)",
+    )
+    parser.add_argument(
+        "--sample-position",
+        type=str,
+        default="last",
+        choices=["last", "first"],
+        help="Mode d'echantillonnage : 'last' (defaut) ou 'first'",
+    )
+    args = parser.parse_args()
+
     model_type, metric_target = get_champion_architecture()
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(script_dir, "../.."))
 
-    if "xgb" in model_type and "hinsage" not in model_type and "grl" not in model_type:
-        print("\n🚀 Lancement du réentraînement XGBoost Tabulaire (optimize_xgb.py)...")
+    if "iforest" in model_type or "isolation" in model_type:
+        print(
+            "\n[INFO] Lancement du reentrainement XGBoost + Isolation Forest (optimize_xgb_iforest.py)..."
+        )
+        script_path = os.path.join(script_dir, "optimize_xgb_iforest.py")
+        cmd = [
+            sys.executable,
+            script_path,
+            "--n-trials",
+            str(args.n_trials),
+            "--sample-size",
+            str(args.sample_size),
+        ]
+    elif (
+        "xgb" in model_type and "hinsage" not in model_type and "grl" not in model_type
+    ):
+        print(
+            "\n[INFO] Lancement du reentrainement XGBoost Tabulaire (optimize_xgb.py)..."
+        )
         script_path = os.path.join(script_dir, "optimize_xgb.py")
         cmd = [
             sys.executable,
             script_path,
             "--n-trials",
-            "100",
+            str(args.n_trials),
             "--sample-size",
-            "-1",
+            str(args.sample_size),
         ]
     else:
         print(
-            f"\n🚀 Lancement du réentraînement Inductive GRL HinSAGE + XGBoost (demo_gnn.py, Cible: {metric_target.upper()})..."
+            f"\n[INFO] Lancement du reentrainement Inductive GRL HinSAGE + XGBoost (demo_gnn.py, Cible: {metric_target.upper()})..."
         )
         script_path = os.path.join(script_dir, "demo_gnn.py")
         cmd = [
@@ -72,11 +116,11 @@ def main():
             "--metric-target",
             metric_target,
             "--sample-size",
-            "-1",
+            str(args.sample_size),
             "--sample-position",
-            "last",
+            args.sample_position,
             "--n-trials",
-            "100",
+            str(args.n_trials),
             "--sampling-ratio",
             "0",
         ]

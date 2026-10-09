@@ -114,7 +114,7 @@ def main():
     args = parse_args()
 
     print("=" * 80)
-    print("🧠 PIPELINE AUTO-ENCODEUR SEMI-SUPERVISÉ (DÉTECTION D'ANOMALIES)")
+    print(" PIPELINE AUTO-ENCODEUR SEMI-SUPERVISÉ (DÉTECTION D'ANOMALIES)")
     print(
         f"   Configuration : n_trials={args.n_trials}, sample_size={args.sample_size}"
     )
@@ -139,7 +139,7 @@ def main():
     y_test = test_df[target_col].astype(int)
 
     print(
-        f"\n📊 Répartition des données : Train={len(train_df):,} ({y_train.sum():,} fraudes), Test={len(test_df):,} ({y_test.sum():,} fraudes)"
+        f"\n Répartition des données : Train={len(train_df):,} ({y_train.sum():,} fraudes), Test={len(test_df):,} ({y_test.sum():,} fraudes)"
     )
 
     best_params = {
@@ -154,7 +154,7 @@ def main():
     # 3. Optimisation Bayésienne Optuna si n_trials > 1
     if args.n_trials > 1:
         print(
-            f"\n🎯 Lancement de l'optimisation bayésienne Optuna ({args.n_trials} essais)..."
+            f"\n Lancement de l'optimisation bayésienne Optuna ({args.n_trials} essais)..."
         )
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -168,7 +168,7 @@ def main():
 
             trial_start = datetime.now()
             print(
-                f"⏳ [ESSAI {trial.number + 1}/{args.n_trials}] "
+                f" [ESSAI {trial.number + 1}/{args.n_trials}] "
                 f"latent_dim={latent_dim}, hidden_dim={hidden_dim}, lr={lr:.5f}, batch_size={batch_size}, epochs={epochs}...",
                 end="",
                 flush=True,
@@ -223,9 +223,9 @@ def main():
 
             print("\n" + "=" * 60)
             print(
-                f"🏆 Meilleur Score Optuna ({args.metric_target.upper()}) : {study.best_value:.4f}"
+                f" Meilleur Score Optuna ({args.metric_target.upper()}) : {study.best_value:.4f}"
             )
-            print("🌟 Meilleurs Hyperparamètres :")
+            print(" Meilleurs Hyperparamètres :")
             for k, v in study.best_params.items():
                 print(f"   • {k}: {v}")
             print("=" * 60)
@@ -233,7 +233,7 @@ def main():
 
     # 4. Calibration fine du seuil optimal par validation croisée avec les meilleurs hyperparamètres
     print(
-        f"\n🔍 Calibration finale du seuil d'anomalie par CV (Métrique: {args.metric_target.upper()})..."
+        f"\n Calibration finale du seuil d'anomalie par CV (Métrique: {args.metric_target.upper()})..."
     )
     skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
     cv_thresholds = []
@@ -265,12 +265,12 @@ def main():
 
     opt_threshold = float(np.median(cv_thresholds))
     print(
-        f"\n🎯 Seuil de décision optimal calibré : {opt_threshold:.4f} (Score moyen validation: {np.mean(cv_scores):.4f})"
+        f"\n Seuil de décision optimal calibré : {opt_threshold:.4f} (Score moyen validation: {np.mean(cv_scores):.4f})"
     )
 
     # 5. Entraînement final de l'Auto-encodeur sur l'ensemble du jeu d'entraînement sain
     print(
-        f"\n🚀 Entraînement final de l'Auto-encodeur ({best_params['epochs']} époques sur transactions saines)..."
+        f"\n Entraînement final de l'Auto-encodeur ({best_params['epochs']} époques sur transactions saines)..."
     )
     detector = AutoencoderFraudDetector(
         hidden_dim=best_params["hidden_dim"],
@@ -284,14 +284,14 @@ def main():
     detector.fit(X_train, y_train)
 
     # 6. Évaluation complète sur le jeu de test holdout
-    print("\n📈 Évaluation sur le jeu de test holdout...")
+    print("\n Évaluation sur le jeu de test holdout...")
     y_test_probas = detector.predict_proba(X_test)[:, 1]
     metrics, cm = evaluate_predictions_and_curves(
         y_test, y_test_probas, threshold=opt_threshold
     )
 
     print("\n" + "-" * 60)
-    print("📋 RÉSULTATS SUR LE JEU DE TEST (HOLD-OUT) :")
+    print(" RÉSULTATS SUR LE JEU DE TEST (HOLD-OUT) :")
     print(f"   • Seuil Opérationnel (decision_threshold) : {opt_threshold:.4f}")
     print(f"   • AUPRC / PR-AUC                          : {metrics['auprc']:.4f}")
     print(f"   • ROC-AUC                                 : {metrics['roc_auc']:.4f}")
@@ -349,11 +349,11 @@ def main():
     # 8. Hot-reload de l'API si le modèle est promu Champion
     if promoted:
         print(
-            "\n🚀 Modèle Auto-encodeur promu Champion ! Déclenchement du Hot-Reload API..."
+            "\n Modèle Auto-encodeur promu Champion ! Déclenchement du Hot-Reload API..."
         )
         trigger_api_reload()
 
-    print("\n🏁 Processus terminé avec succès.")
+    print("\n Processus terminé avec succès.")
 
 
 if __name__ == "__main__":

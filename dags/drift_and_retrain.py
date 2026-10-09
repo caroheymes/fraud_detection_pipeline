@@ -27,14 +27,15 @@ def refresh_gold_marts_dbt():
     if res.returncode != 0:
         print(f"Erreur dbt run : {res.stderr}")
         raise RuntimeError(f"Échec de dbt run : {res.stderr}")
-    print("✅ Tables Gold (SLA, marchands, etc.) rafraîchies avec succès par dbt !")
+    print("[INFO] Tables Gold (SLA, marchands, etc.) rafraîchies avec succès par dbt !")
 
 
 def check_drift_evidently(**context):
     """Exécute le script detect_drift.py dans ray-head avec la date simulée courante"""
     cmd = (
-        "docker exec -t fraud-detection-ray-head python src/training/detect_drift.py "
+        "docker exec -i fraud-detection-ray-head python src/audit/detect_drift.py "
         "--current-days 7 --ref-days-start 38 --ref-days-end 8 "
+        "--max-relative-perf-drop 0.05 --psi-threshold 0.20 "
         "--min-f2 0.50 --min-recall 0.50 --min-precision 0.20 --min-f1 0.50"
     )
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -45,24 +46,26 @@ def check_drift_evidently(**context):
 
 def trigger_hpo_and_retrain():
     """Exécute le pipeline de réentraînement dynamique selon l'architecture du Champion actif dans MLflow"""
-    cmd = "docker exec -t fraud-detection-ray-head python src/training/retrain_champion.py"
+    cmd = "docker exec -i fraud-detection-ray-head python src/training/retrain_champion.py"
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:
         raise RuntimeError(
-            f"Échec de l'optimisation/réentraînement du modèle : {res.stderr}"
+            f"Échec de l'optimisation/réentraînement du modèle : {res.stderr or res.stdout}"
         )
 
 
 def export_shap_rules():
     """Exécute le script export_rules.py pour extraire les seuils, mettre à jour Redis et le JSON local"""
-    cmd = "docker exec -t fraud-detection-ray-head python src/explain/export_rules.py"
+    cmd = "docker exec -i fraud-detection-ray-head python src/explain/export_rules.py"
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     print(res.stdout)
     print(res.stderr)
     if res.returncode != 0:
-        raise RuntimeError(f"Échec de l'export des règles de suspicion : {res.stderr}")
+        raise RuntimeError(
+            f"Échec de l'export des règles de suspicion : {res.stderr or res.stdout}"
+        )
 
 
 default_args = {
@@ -102,9 +105,8 @@ with DAG(
     export_rules_task = PythonOperator(
         task_id="export_rules",
         python_callable=export_shap_rules,
-        trigger_rule="none_failed_min_one_success",  # S'exécute si train_task ou skip_task réussit sans erreur
     )
 
     dbt_task >> audit_task
     audit_task >> [train_task, skip_task]
-    [train_task, skip_task] >> export_rules_task
+    train_task >> export_rules_task

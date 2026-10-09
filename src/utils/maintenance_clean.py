@@ -24,7 +24,7 @@ from src.utils.mlflow_manager import MLflowQualityGate
 
 
 def purge_database(cutoff_date: str = "2020-08-15 23:59:59"):
-    print(f"🧹 1. PURGE DE LA BASE POSTGRESQL APRÈS LE {cutoff_date}...")
+    print(f" 1. PURGE DE LA BASE POSTGRESQL APRÈS LE {cutoff_date}...")
     engine = get_postgres_engine()
     with engine.connect() as conn:
         # 1.1 silver.rawdata
@@ -47,9 +47,9 @@ def purge_database(cutoff_date: str = "2020-08-15 23:59:59"):
                     {"cutoff": cutoff_date},
                 )
                 conn.commit()
-                print(f"   ✅ {res_cnt:,} transactions supprimées de silver.rawdata.")
+                print(f"    {res_cnt:,} transactions supprimées de silver.rawdata.")
             else:
-                print("   ℹ️ Aucune transaction à supprimer dans silver.rawdata.")
+                print("    Aucune transaction à supprimer dans silver.rawdata.")
 
             # Nouvelle date max
             new_max = conn.execute(
@@ -59,10 +59,10 @@ def purge_database(cutoff_date: str = "2020-08-15 23:59:59"):
                 text("SELECT COUNT(*) FROM silver.rawdata")
             ).scalar()
             print(
-                f"   📊 silver.rawdata restante : {total_remaining:,} transactions (Date max: {new_max})."
+                f"    silver.rawdata restante : {total_remaining:,} transactions (Date max: {new_max})."
             )
         except Exception as e:
-            print(f"   ⚠️ Erreur silver.rawdata : {e}")
+            print(f"    Erreur silver.rawdata : {e}")
 
         # 1.2 Vérification d'éventuelles autres tables
         try:
@@ -73,32 +73,32 @@ def purge_database(cutoff_date: str = "2020-08-15 23:59:59"):
                 {"cutoff": cutoff_date},
             )
             conn.commit()
-            print("   ✅ simulation_queue purgée.")
+            print("    simulation_queue purgée.")
         except Exception:
             pass
 
 
 def promote_version(version: str = "26"):
-    print(f"\n👑 2. PROMOTION DU MODÈLE VERSION {version} COMME @CHAMPION...")
+    print(f"\n 2. PROMOTION DU MODÈLE VERSION {version} COMME @CHAMPION...")
     gate = MLflowQualityGate(model_name="fraud_detector")
     success = gate.set_champion_alias(version)
     if success:
-        print(f"   ✅ Alias '@champion' réassigné avec succès à la version {version} !")
+        print(f"    Alias '@champion' réassigné avec succès à la version {version} !")
     else:
         print(
-            f"   ❌ Échec de l'assignation de l'alias @champion à la version {version}."
+            f"    Échec de l'assignation de l'alias @champion à la version {version}."
         )
 
     gate.print_status_table()
 
 
 def reload_api():
-    print("\n🔄 3. RECHARGEMENT À CHAUD DE L'API FASTAPI...")
+    print("\n 3. RECHARGEMENT À CHAUD DE L'API FASTAPI...")
     reload_serving_api()
 
 
 def sync_redis_rules():
-    print("\n📝 4. SYNCHRONISATION DES RÈGLES REDIS (EXPORT RULES)...")
+    print("\n 4. SYNCHRONISATION DES RÈGLES REDIS (EXPORT RULES)...")
     try:
         import subprocess
 
@@ -109,12 +109,12 @@ def sync_redis_rules():
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0:
             print(
-                "   ✅ Règles de suspicion SHAP réexportées et injectées dans Redis avec succès !"
+                "    Règles de suspicion SHAP réexportées et injectées dans Redis avec succès !"
             )
         else:
-            print(f"   ⚠️ Erreur export_rules : {res.stderr}")
+            print(f"    Erreur export_rules : {res.stderr}")
     except Exception as e:
-        print(f"   ⚠️ Échec de l'export des règles : {e}")
+        print(f"    Échec de l'export des règles : {e}")
 
 
 import argparse
@@ -142,7 +142,7 @@ def main():
     promote_version(args.version)
     reload_api()
     sync_redis_rules()
-    print("\n🏁 Opérations de maintenance et promotion terminées avec succès !")
+    print("\n Opérations de maintenance et promotion terminées avec succès !")
 
 
 if __name__ == "__main__":

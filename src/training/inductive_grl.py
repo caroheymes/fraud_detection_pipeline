@@ -4,6 +4,8 @@ Inductive Graph Representation Learning (HinSAGE + XGBoost) Pipeline.
 Fournit une classe InductiveGRLPipeline compatible Scikit-Learn pour l'inférence temps réel et batch.
 """
 
+import gc
+
 import numpy as np
 import pandas as pd
 import torch
@@ -14,7 +16,7 @@ from skrub import TableVectorizer
 from xgboost import XGBClassifier
 
 # Import du module features transverse
-from src.utils.features import prepare_features
+from src.utils.features import BASE_FEATURE_COLUMNS, prepare_features
 
 
 class FocalLoss(nn.Module):
@@ -116,20 +118,7 @@ class HinSAGERepresentationLearner:
         if not is_train and hasattr(self.vectorizer, "feature_names_in_"):
             candidate_cols = list(self.vectorizer.feature_names_in_)
         else:
-            candidate_cols = [
-                "category",
-                "amt",
-                "gender",
-                "distance_achat",
-                "age",
-                "city_pop",
-                "hour_sin",
-                "hour_cos",
-                "weekday_sin",
-                "weekday_cos",
-                "month_sin",
-                "month_cos",
-            ]
+            candidate_cols = BASE_FEATURE_COLUMNS
         present_cols = [c for c in candidate_cols if c in df_prepared.columns]
         raw_feats = df_prepared[present_cols]
 
@@ -229,7 +218,23 @@ class HinSAGERepresentationLearner:
             c_proj = self.net.client_proj(h_c_tensor)
             m_proj = self.net.merchant_proj(h_m_tensor)
             z_train, _ = self.net(x_t_tensor, c_proj, m_proj)
-            return z_train.cpu().numpy()
+            result = z_train.cpu().numpy().astype(np.float32)
+
+        del (
+            x_t_tensor,
+            h_c_tensor,
+            h_m_tensor,
+            y_tensor,
+            h_c_arr,
+            h_m_arr,
+            c_proj,
+            m_proj,
+            z_train,
+        )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+        return result
 
     def transform(self, test_df: pd.DataFrame) -> np.ndarray:
         """Étape inductive pour transactions en streaming ou batch."""
@@ -262,7 +267,13 @@ class HinSAGERepresentationLearner:
             c_proj = self.net.client_proj(h_c_tensor)
             m_proj = self.net.merchant_proj(h_m_tensor)
             z_ind, _ = self.net(x_t_tensor, c_proj, m_proj)
-            return z_ind.cpu().numpy()
+            result = z_ind.cpu().numpy().astype(np.float32)
+
+        del x_t_tensor, h_c_tensor, h_m_tensor, h_c_arr, h_m_arr, c_proj, m_proj, z_ind
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+        return result
 
 
 class InductiveGRLPipeline(BaseEstimator, ClassifierMixin):

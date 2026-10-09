@@ -16,6 +16,12 @@ import gc
 import json
 import os
 import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)
+
 from datetime import datetime
 from typing import Any
 
@@ -38,6 +44,7 @@ from src.training.inductive_grl import (
 )
 from src.utils.api_reloader import reload_serving_api
 from src.utils.data_loader import load_dataset
+from src.utils.features import get_moderate_sampled_df as get_moderate_sampled_data
 from src.utils.mlflow_manager import MLflowQualityGate
 from src.utils.threshold import evaluate_predictions_and_curves, find_optimal_threshold
 
@@ -45,34 +52,6 @@ from src.utils.threshold import evaluate_predictions_and_curves, find_optimal_th
 MLFLOW_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 mlflow.set_tracking_uri(MLFLOW_URI)
 mlflow.set_experiment("fraud_detection")
-
-
-def get_moderate_sampled_data(
-    df: pd.DataFrame, target_ratio: float = 0.05, label_col: str = "fraud_label"
-) -> pd.DataFrame:
-    """Rééchantillonne modérément les données d'entraînement pour équilibrer le GNN si demandé."""
-    if target_ratio <= 0.0 or target_ratio >= 1.0:
-        return df
-
-    fraud = df[df[label_col] == 1]
-    normal = df[df[label_col] == 0]
-
-    n_fraud = len(fraud)
-    if n_fraud == 0:
-        return df
-
-    n_normal_required = int(n_fraud * (1.0 / target_ratio - 1.0))
-    if n_normal_required < len(normal):
-        normal_sampled = normal.sample(n=n_normal_required, random_state=42)
-    else:
-        normal_sampled = normal
-
-    sampled_df = (
-        pd.concat([fraud, normal_sampled])
-        .sample(frac=1.0, random_state=42)
-        .reset_index(drop=True)
-    )
-    return sampled_df
 
 
 def run_hpo_inductive_grl(
@@ -85,10 +64,20 @@ def run_hpo_inductive_grl(
     Exécute l'optimisation bayésienne d'hyperparamètres pour l'architecture Inductive GRL.
     Utilise un système de mise en cache des représentations HinSAGE pour accélérer drastiquement les trials.
     """
-    target_metric_key = "f1_class_1" if metric_target == "f1" else "f2_class_1"
-    target_metric_label = (
-        "F1-Score Fraude" if metric_target == "f1" else "F2-Score Fraude"
-    )
+    m_target = metric_target.lower()
+    is_minimize = m_target in ["brier", "brier_score"]
+    if is_minimize:
+        target_metric_key = "brier_score"
+        target_metric_label = "Brier Score (Calibration)"
+    elif m_target in ["f1", "f1_score"]:
+        target_metric_key = "f1_class_1"
+        target_metric_label = "F1-Score Fraude"
+    elif m_target in ["auprc", "pr_auc"]:
+        target_metric_key = "pr_auc"
+        target_metric_label = "PR-AUC (AUPRC)"
+    else:
+        target_metric_key = "f2_class_1"
+        target_metric_label = "F2-Score Fraude"
 
     df_clean = df.copy().reset_index(drop=True)
     cutoff = round(0.70 * len(df_clean))
@@ -104,7 +93,7 @@ def run_hpo_inductive_grl(
     y_test = test_data["fraud_label"].values
 
     print("=" * 70)
-    print("  🚀 PIPELINE INDUCTIVE GRL (HinSAGE + XGBoost) RECALIBRÉ")
+    print("   PIPELINE INDUCTIVE GRL (HinSAGE + XGBoost) RECALIBRÉ")
     print(f"  • Données Train : {len(train_data):,} lignes (Fraudes: {sum(y_train):,})")
     print(f"  • Données Test  : {len(test_data):,} lignes (Fraudes: {sum(y_test):,})")
     print(f"  • Métrique cible : {target_metric_label} ({target_metric_key})")
@@ -122,7 +111,7 @@ def run_hpo_inductive_grl(
             return feature_cache[emb_size]
 
         print(
-            f"\n🧠 [HinSAGE GNN] Entraînement de l'encodeur de graphe (emb_dim={emb_size}, hidden_dim={emb_size * 2})...",
+            f"\n[HinSAGE GNN] Entraînement de l'encodeur de graphe (emb_dim={emb_size}, hidden_dim={emb_size * 2})...",
             flush=True,
         )
         learner = HinSAGERepresentationLearner(
@@ -131,138 +120,162 @@ def run_hpo_inductive_grl(
             lr=0.005,
             epochs=8,
         )
-        train_emb = learner.fit_transform(train_data, train_data["fraud_label"])
-        test_emb = learner.transform(test_data)
+        train_emb = learner.fit_transform(train_data, train_data["fraud_label"]).astype(
+            np.float32
+        )
+        test_emb = learner.transform(test_data).astype(np.float32)
 
         raw_train = learner._extract_clean_features(
             learner._prepare_df(train_data), is_train=False
-        )
+        ).astype(np.float32)
         raw_test = learner._extract_clean_features(
             learner._prepare_df(test_data), is_train=False
-        )
+        ).astype(np.float32)
 
-        X_tr = np.hstack([train_emb, raw_train])
-        X_te = np.hstack([test_emb, raw_test])
+        X_tr = np.ascontiguousarray(np.hstack([train_emb, raw_train]), dtype=np.float32)
+        X_te = np.ascontiguousarray(np.hstack([test_emb, raw_test]), dtype=np.float32)
+
+        del train_emb, test_emb, raw_train, raw_test
+        gc.collect()
 
         feature_cache[emb_size] = (learner, X_tr, X_te)
         return feature_cache[emb_size]
 
-    best_score_so_far = -1.0
+    best_score_so_far = float("inf") if is_minimize else -1.0
     best_pipeline_bundle = None
 
     def objective(trial: optuna.Trial) -> float:
         nonlocal best_score_so_far, best_pipeline_bundle
 
-        # 1. Hyperparamètres HinSAGE
-        embedding_size = trial.suggest_categorical("embedding_size", [12, 16, 24, 32])
+        try:
+            # 1. Hyperparamètres HinSAGE
+            embedding_size = trial.suggest_categorical(
+                "embedding_size", [12, 16, 24, 32]
+            )
 
-        # 2. Hyperparamètres XGBoost Recalibrés
-        max_depth = trial.suggest_int("max_depth", 6, 11)
-        n_estimators = trial.suggest_int("n_estimators", 180, 320, step=20)
-        learning_rate = trial.suggest_float("learning_rate", 0.012, 0.045, log=True)
-        scale_pos_weight = trial.suggest_float("scale_pos_weight", 2.0, 7.5)
-        gamma = trial.suggest_float("gamma", 3.0, 9.0)
-        min_child_weight = trial.suggest_int("min_child_weight", 3, 8)
-        colsample_bytree = trial.suggest_float("colsample_bytree", 0.70, 0.85)
-        reg_alpha = trial.suggest_float("reg_alpha", 1e-5, 0.1, log=True)
-        reg_lambda = trial.suggest_float("reg_lambda", 0.1, 4.0, log=True)
+            # 2. Hyperparamètres XGBoost Recalibrés
+            max_depth = trial.suggest_int("max_depth", 6, 11)
+            n_estimators = trial.suggest_int("n_estimators", 180, 320, step=20)
+            learning_rate = trial.suggest_float("learning_rate", 0.012, 0.045, log=True)
+            scale_pos_weight = trial.suggest_float("scale_pos_weight", 2.0, 7.5)
+            gamma = trial.suggest_float("gamma", 3.0, 9.0)
+            min_child_weight = trial.suggest_int("min_child_weight", 3, 8)
+            colsample_bytree = trial.suggest_float("colsample_bytree", 0.70, 0.85)
+            reg_alpha = trial.suggest_float("reg_alpha", 1e-5, 0.1, log=True)
+            reg_lambda = trial.suggest_float("reg_lambda", 0.1, 4.0, log=True)
 
-        xgb_params = {
-            "max_depth": max_depth,
-            "n_estimators": n_estimators,
-            "learning_rate": learning_rate,
-            "scale_pos_weight": scale_pos_weight,
-            "gamma": gamma,
-            "min_child_weight": min_child_weight,
-            "colsample_bytree": colsample_bytree,
-            "reg_alpha": reg_alpha,
-            "reg_lambda": reg_lambda,
-            "subsample": 1.0,
-            "random_state": 42,
-            "eval_metric": "logloss",
-            "tree_method": "hist",
-            "n_jobs": 2,
-        }
-
-        learner, X_train_comb, X_test_comb = get_or_compute_features(embedding_size)
-
-        clf = XGBClassifier(**xgb_params)
-        clf.fit(X_train_comb, y_train)
-        preds_proba = clf.predict_proba(X_test_comb)[:, 1]
-
-        optimal_thresh, _ = find_optimal_threshold(
-            y_test, preds_proba, metric_target=metric_target
-        )
-        metrics, cm = evaluate_predictions_and_curves(
-            y_test, preds_proba, threshold=optimal_thresh
-        )
-
-        current_score = metrics[target_metric_key]
-
-        is_new_best = ""
-        if current_score > best_score_so_far:
-            best_score_so_far = current_score
-            is_new_best = " 🌟 [NOUVEAU MEILLEUR SCORE]"
-
-            # Sauvegarder le bundle complet du meilleur modèle
-            best_pipeline_bundle = {
-                "learner": learner,
-                "clf": clf,
-                "embedding_size": embedding_size,
-                "xgb_params": xgb_params,
-                "metrics": metrics,
-                "confusion_matrix": cm,
-                "calibrated_threshold": optimal_thresh,
-                "predictions_proba": preds_proba,
+            xgb_params = {
+                "max_depth": max_depth,
+                "n_estimators": n_estimators,
+                "learning_rate": learning_rate,
+                "scale_pos_weight": scale_pos_weight,
+                "gamma": gamma,
+                "min_child_weight": min_child_weight,
+                "colsample_bytree": colsample_bytree,
+                "reg_alpha": reg_alpha,
+                "reg_lambda": reg_lambda,
+                "subsample": 1.0,
+                "random_state": 42,
+                "eval_metric": "logloss",
+                "tree_method": "hist",
+                "n_jobs": 1,
             }
 
-        print(
-            f"┌── 🧪 [ESSAI {trial.number + 1:02d}/{n_trials}]{is_new_best} "
-            + "─" * max(2, 45 - len(is_new_best)),
-            flush=True,
-        )
-        print(
-            f"│ 🎯 {target_metric_label:15s} : {current_score:.4f} (Seuil Calibré: {optimal_thresh:.4f})",
-            flush=True,
-        )
-        print(
-            f"│ 📈 Précision C1: {metrics['prec_class_1'] * 100:6.2f}% | Rappel C1: {metrics['rec_class_1'] * 100:6.2f}% | F1 C1: {metrics['f1_class_1']:.4f} | F2 C1: {metrics['f2_class_1']:.4f}",
-            flush=True,
-        )
-        print(
-            f"│ 📊 Matrice Confusion : TP={cm['tp']} | FP={cm['fp']} | FN={cm['fn']} | TN={cm['tn']}",
-            flush=True,
-        )
-        print(
-            f"│ ⚙️  Params : Emb={embedding_size}, Depth={max_depth}, Trees={n_estimators}, LR={learning_rate:.4f}, Gamma={gamma:.2f}",
-            flush=True,
-        )
-        print("└" + "─" * 70, flush=True)
+            learner, X_train_comb, X_test_comb = get_or_compute_features(embedding_size)
 
-        try:
-            with mlflow.start_run(
-                run_name=f"Trial_{trial.number + 1:02d}_InductiveGRL_{metric_target.upper()}",
-                nested=True,
-            ):
-                mlflow.log_params(
-                    {
-                        "embedding_size": embedding_size,
-                        "target_metric": metric_target,
-                        **xgb_params,
-                    }
-                )
-                mlflow.log_metrics(metrics)
-        except Exception as e:
-            print(f"⚠️ [MLflow] Log du trial échoué : {e}")
+            clf = XGBClassifier(**xgb_params)
+            clf.fit(X_train_comb, y_train)
+            preds_proba = clf.predict_proba(X_test_comb)[:, 1]
 
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+            optimal_thresh, _ = find_optimal_threshold(
+                y_test, preds_proba, metric_target=metric_target
+            )
+            metrics, cm = evaluate_predictions_and_curves(
+                y_test, preds_proba, threshold=optimal_thresh
+            )
 
-        return current_score
+            current_score = float(metrics[target_metric_key])
+
+            is_new_best = ""
+            is_improved = (
+                (current_score < best_score_so_far)
+                if is_minimize
+                else (current_score > best_score_so_far)
+            )
+            if is_improved:
+                best_score_so_far = current_score
+                is_new_best = "  [NOUVEAU MEILLEUR SCORE]"
+
+                best_pipeline_bundle = {
+                    "learner": learner,
+                    "clf": clf,
+                    "embedding_size": embedding_size,
+                    "xgb_params": xgb_params,
+                    "metrics": metrics,
+                    "confusion_matrix": cm,
+                    "calibrated_threshold": optimal_thresh,
+                    "predictions_proba": preds_proba,
+                }
+            else:
+                # Libération immédiate de la mémoire du modèle non retenu
+                del clf
+                del preds_proba
+
+            print(
+                f"┌──  [ESSAI {trial.number + 1:02d}/{n_trials}]{is_new_best} "
+                + "─" * max(2, 45 - len(is_new_best)),
+                flush=True,
+            )
+            print(
+                f"│  {target_metric_label:15s} : {current_score:.4f} (Seuil Calibré: {optimal_thresh:.4f})",
+                flush=True,
+            )
+            print(
+                f"│  Précision C1: {metrics['prec_class_1'] * 100:6.2f}% | Rappel C1: {metrics['rec_class_1'] * 100:6.2f}% | F1 C1: {metrics['f1_class_1']:.4f} | F2 C1: {metrics['f2_class_1']:.4f}",
+                flush=True,
+            )
+            print(
+                f"│  Matrice Confusion : TP={cm['tp']} | FP={cm['fp']} | FN={cm['fn']} | TN={cm['tn']}",
+                flush=True,
+            )
+            print(
+                f"│   Params : Emb={embedding_size}, Depth={max_depth}, Trees={n_estimators}, LR={learning_rate:.4f}, Gamma={gamma:.2f}",
+                flush=True,
+            )
+            print("└" + "─" * 70, flush=True)
+
+            try:
+                with mlflow.start_run(
+                    run_name=f"Trial_{trial.number + 1:02d}_InductiveGRL_{metric_target.upper()}",
+                    nested=True,
+                ):
+                    mlflow.log_params(
+                        {
+                            "embedding_size": embedding_size,
+                            "target_metric": metric_target,
+                            **xgb_params,
+                        }
+                    )
+                    mlflow.log_metrics(metrics)
+            except Exception as e:
+                print(f"[MLflow] Log du trial échoué : {e}")
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            return current_score
+
+        except Exception as trial_err:
+            print(
+                f"[ERREUR ESSAI {trial.number + 1}] Échec de l'essai : {trial_err}",
+                flush=True,
+            )
+            gc.collect()
+            return 1.0 if is_minimize else 0.0
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    study = optuna.create_study(direction="maximize")
+    study = optuna.create_study(direction="minimize" if is_minimize else "maximize")
 
     parent_run_name = f"InductiveGRL_Study_{metric_target.upper()}_{datetime.now().strftime('%m%d_%H%M%S')}"
     with mlflow.start_run(run_name=parent_run_name):
@@ -281,11 +294,15 @@ def run_hpo_inductive_grl(
         mlflow.set_tag("study_status", "FINISHED")
 
     print("\n" + "=" * 70)
-    print(f"🏆 MEILLEUR ESSAI RETENU ({target_metric_label} : {study.best_value:.4f})")
+    print(f"[MEILLEUR ESSAI RETENU] ({target_metric_label} : {study.best_value:.4f})")
     print(f"Hyperparamètres optimaux : {study.best_params}")
     print("=" * 70 + "\n")
 
     # Assemblage de l'objet de production InductiveGRLPipeline
+    if best_pipeline_bundle is None:
+        raise RuntimeError(
+            "Aucun essai Optuna n'a abouti avec succès pour construire le pipeline Inductive GRL."
+        )
     best_bundle = best_pipeline_bundle
     final_pipeline = InductiveGRLPipeline(
         embedding_size=best_bundle["embedding_size"],
@@ -299,10 +316,10 @@ def run_hpo_inductive_grl(
     final_pipeline.decision_threshold = float(best_bundle["calibrated_threshold"])
 
     print(
-        f"\n📊 RÉSULTATS FINAUX DU CHAMPION CANDIDAT (Optimisé sur {target_metric_label}) :"
+        f"\n[RESULTATS FINAUX] CHAMPION CANDIDAT (Optimisé sur {target_metric_label}) :"
     )
     for k, v in best_bundle["metrics"].items():
-        print(f"  • {k:22s} : {v:.4f}")
+        print(f"  - {k:22s} : {v:.4f}")
     print("\nMatrice de confusion :")
     print(best_bundle["confusion_matrix"])
 
@@ -360,7 +377,7 @@ def run_hpo_inductive_grl(
     }
     with open(metrics_comp_path, "w") as f:
         json.dump(comp_data, f, indent=4)
-    print(f"\n✅ Métriques comparatives exportées dans : {metrics_comp_path}")
+    print(f"\n[METRIQUES] Exportées dans : {metrics_comp_path}")
 
     return {
         "pipeline": final_pipeline,
@@ -396,8 +413,8 @@ def main():
         "--metric-target",
         type=str,
         default="f2",
-        choices=["f1", "f2"],
-        help="Métrique cible : 'f2' (recommandé) ou 'f1'",
+        choices=["f1", "f2", "brier", "auprc"],
+        help="Métrique cible : 'f2' (recommandé), 'f1', 'brier' (calibration) ou 'auprc'",
     )
     parser.add_argument(
         "--sample-position",

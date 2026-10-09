@@ -54,25 +54,16 @@ df_sample = (
     .reset_index(drop=True)
 )
 
+from src.utils.features import BASE_FEATURE_COLUMNS, prepare_features
+
+df_sample = prepare_features(df_sample, include_graph_ids=True)
+
 y_sample = df_sample["is_fraud"]
 
 # Extraction des features et du prédicteur selon le type de modèle
 if hasattr(model, "named_steps"):
     # Pipeline classique Scikit-Learn (ex: XGBoost baseline)
-    features = [
-        "category",
-        "amt",
-        "gender",
-        "distance_achat",
-        "age",
-        "city_pop",
-        "hour_sin",
-        "hour_cos",
-        "weekday_sin",
-        "weekday_cos",
-        "month_sin",
-        "month_cos",
-    ]
+    features = [c for c in BASE_FEATURE_COLUMNS if c in df_sample.columns]
     X_sample = df_sample[features]
     preprocessor = model.named_steps["preprocessor"]
     predictor = model.named_steps["model"]
@@ -98,6 +89,33 @@ elif hasattr(model, "hinsage"):
     test_embeddings = model.hinsage.transform(df_sample)
     X_features_arr = model._prepare_features(df_sample, test_embeddings)
     predictor = model.classifier
+    try:
+        col_names = model.get_feature_names_out()
+    except Exception:
+        col_names = [f"feat_{i}" for i in range(X_features_arr.shape[1])]
+    X_encoded = pd.DataFrame(X_features_arr, columns=col_names, index=df_sample.index)
+elif hasattr(model, "iso_forest"):
+    # Pipeline Isolation Forest + XGBoost (Anomaly Stacking)
+    features = [
+        "category",
+        "amt",
+        "gender",
+        "distance_achat",
+        "age",
+        "city_pop",
+        "hour_sin",
+        "hour_cos",
+        "weekday_sin",
+        "weekday_cos",
+        "month_sin",
+        "month_cos",
+    ]
+    from src.utils.features import prepare_features
+
+    df_prep = prepare_features(df_sample, include_graph_ids=False)
+    X_in = df_prep[[c for c in features if c in df_prep.columns]]
+    X_features_arr = model.transform(X_in)
+    predictor = getattr(model, "classifier", getattr(model, "xgb_model", model))
     try:
         col_names = model.get_feature_names_out()
     except Exception:
@@ -156,7 +174,7 @@ rules_config = {
 }
 
 # A. Extraction des variables continues simples (valeurs réelles non standardisées)
-for col in ["amt", "distance_achat", "age", "city_pop"]:
+for col in ["amt", "distance_achat", "age", "city_pop", "user_daily_tx_count"]:
     if col in X_encoded.columns and col in df_sample.columns:
         actual_values = df_sample[col]
         shap_values = shap_contribs[col]
@@ -171,6 +189,10 @@ for col in ["amt", "distance_achat", "age", "city_pop"]:
             print(
                 f"  [Seuil] {col} maximum toléré : {rules_config['thresholds'][f'{col}_max']}"
             )
+
+if "user_daily_tx_count_max" not in rules_config["thresholds"]:
+    rules_config["thresholds"]["user_daily_tx_count_max"] = 3.0
+    print("  [Seuil] user_daily_tx_count maximum toléré : 3.0 (Par défaut)")
 
 # B. Extraction des catégories suspectes
 for col in X_encoded.columns:

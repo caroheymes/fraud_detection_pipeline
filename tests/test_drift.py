@@ -7,3 +7,5 @@ def test_drift_analysis_execution():
     assert isinstance(drift_detected, bool)
     assert "dataset_drift" in report
     assert "metrics" in report
+    assert "error" not in report
+

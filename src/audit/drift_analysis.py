@@ -1,126 +1,58 @@
 # src/audit/drift_analysis.py
+"""
+Module d'audit de dérive des données (Evidently AI) et point d'entrée programmatique
+pour l'observabilité du Data Drift, Score Drift et Concept Drift.
+"""
+
+from __future__ import annotations
+
 import json
 import os
+import sys
+from typing import Any
 
-import pandas as pd
+# Import du module transverse
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-try:
-    from evidently import Report
-    from evidently.presets import DataDriftPreset
-except ImportError:
-    from evidently.metric_preset import DataDriftPreset
-    from evidently.report import Report
+from src.audit.detect_drift import run_full_drift_audit
 
 
-def run_evidently_drift_check():
-    print("Démarrage de l'analyse de drift avec Evidently AI...")
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    ref_path = os.path.join(script_dir, "..", "training", "reference_data.csv")
-
-    if not os.path.exists(ref_path):
-        print(f"Erreur : Le fichier de référence {ref_path} n'existe pas.")
-        return False, {}
-
+def run_evidently_drift_check() -> tuple[bool, dict[str, Any]]:
+    """
+    Exécute un contrôle de dérive Evidently AI et retourne (drift_detected, report_dict)
+    compatible avec la suite de tests et les modules d'audit.
+    """
     try:
-        # 1. Charger les données de référence (données de test historiques)
-        df_ref = pd.read_csv(ref_path)
+        _should_retrain, report = run_full_drift_audit()
 
-        # 2. Préparer un échantillon actuel pour l'analyse (par exemple les 1000 dernières lignes)
-        df_curr = df_ref.tail(1000).copy()
-        df_reference = df_ref.head(1000).copy()
+        # Adaptation du dictionnaire pour conformité avec l'interface historique
+        data_drift_info = report.get("data_drift", {})
+        drift_detected = data_drift_info.get("drift_detected", False)
+        details = data_drift_info.get("details", {})
 
-        # Définition des variables cibles
-        relevant_columns = [
-            "amt",
-            "gender",
-            "is_fraud",
-            "hour_sin",
-            "hour_cos",
-            "distance_achat",
-        ]
+        metrics_flat = {}
+        for col, det in details.items():
+            metrics_flat[f"{col}_drift_score"] = det.get("metric_value", 0.0)
 
-        df_reference_filtered = df_reference[relevant_columns]
-        df_curr_filtered = df_curr[relevant_columns]
+        compat_report = {
+            "dataset_drift": drift_detected,
+            "metrics": metrics_flat,
+            "full_audit": report,
+        }
 
-        # 3. Lancer Evidently Report (DataDriftPreset)
-        try:
-            from evidently import DataDefinition, Dataset
+        # Sauvegarde du rapport JSON
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(script_dir, "data_drift_report.json"), "w") as f:
+            json.dump(compat_report, f, indent=4)
 
-            schema = DataDefinition(
-                numerical_columns=[
-                    "amt",
-                    "hour_sin",
-                    "hour_cos",
-                    "distance_achat",
-                    "is_fraud",
-                ],
-                categorical_columns=["gender"],
-            )
-            eval_ref = Dataset.from_pandas(
-                df_reference_filtered, data_definition=schema
-            )
-            eval_curr = Dataset.from_pandas(df_curr_filtered, data_definition=schema)
-            report = Report([DataDriftPreset()])
-            my_eval = report.run(eval_curr, eval_ref)
-            report_dict = (
-                my_eval.dict() if hasattr(my_eval, "dict") else my_eval.as_dict()
-            )
-
-            metrics = report_dict.get("metrics", [])
-            drift_flags = []
-            drift_metrics = {"dataset_drift": False, "metrics": {}}
-            for m in metrics:
-                name = m.get("metric_name", "")
-                if name.startswith("ValueDrift"):
-                    col = m["config"]["column"]
-                    val = float(m["value"])
-                    threshold = float(m["config"]["threshold"])
-                    method = m["config"]["method"]
-                    col_drift = (
-                        1.0
-                        if ("distance" in method.lower() and val > threshold)
-                        or ("distance" not in method.lower() and val < threshold)
-                        else 0.0
-                    )
-                    drift_flags.append(col_drift)
-                    drift_metrics["metrics"][f"{col}_drift_score"] = val
-            drift_detected = bool(
-                len(drift_flags) > 0 and (sum(drift_flags) / len(drift_flags)) > 0.5
-            )
-            drift_metrics["dataset_drift"] = drift_detected
-        except Exception:
-            report = Report(metrics=[DataDriftPreset()])
-            report.run(
-                reference_data=df_reference_filtered, current_data=df_curr_filtered
-            )
-            report_dict = (
-                report.as_dict()
-                if hasattr(report, "as_dict")
-                else getattr(report, "dict", lambda: {})()
-            )
-            metrics = report_dict.get("metrics", [])
-            drift_detected = False
-            drift_metrics = {"dataset_drift": False, "metrics": {}}
-            for m in metrics:
-                if m.get("metric") == "DatasetDriftMetric":
-                    drift_detected = m["result"]["dataset_drift"]
-                    drift_metrics["dataset_drift"] = drift_detected
-                elif m.get("metric") == "ColumnDriftMetric":
-                    col = m["result"]["column_name"]
-                    drift_score = m["result"]["drift_score"]
-                    drift_metrics["metrics"][f"{col}_drift_score"] = float(drift_score)
-
-        print(f"Analyse terminée. Drift global détecté : {drift_detected}")
-        return drift_detected, drift_metrics
-
+        return drift_detected, compat_report
     except Exception as e:
-        print(f"Erreur lors de l'exécution d'Evidently : {e}")
-        return False, {"error": str(e)}
+        print(f" Erreur lors de l'analyse Evidently : {e}")
+        return False, {"dataset_drift": False, "metrics": {}, "error": str(e)}
 
 
 if __name__ == "__main__":
-    detected, report = run_evidently_drift_check()
-    # Sauvegarde du rapport pour le tableau de bord
-    with open("data_drift_report.json", "w") as f:
-        json.dump(report, f, indent=4)
+    detected, rep = run_evidently_drift_check()
+    print(f"Drift détecté : {detected}")

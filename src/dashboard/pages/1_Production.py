@@ -13,11 +13,13 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from src.dashboard.theme import apply_theme
 from src.utils.db import get_postgres_engine
 
-st.set_page_config(page_title="Performances & Métriques", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Performances & Métriques", layout="wide")
+apply_theme()
 
-st.title("📈 Performances & métriques de production")
+st.title("PERFORMANCES EN PRODUCTION")
 st.markdown("---")
 
 
@@ -157,7 +159,7 @@ if not runs_df.empty:
         if raw_ratio != "N/A" and raw_ratio != "None":
             col_ratio = f"{raw_ratio}%"
 
-st.subheader("📊 Métriques globales (historique complet)")
+st.subheader("Métriques globales (historique complet)")
 col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.metric("Total Transactions (Base)", f"{total_tx:,}")
@@ -219,9 +221,7 @@ if date_df is not None and not date_df.empty and date_df.iloc[0, 0] is not None:
                 yesterday_rate = (yesterday_fraud / yesterday_tx) * 100.0
 
 st.markdown("---")
-st.subheader(
-    f"📅 Métriques du jour : {last_date_str} (dernier jour disponible vs veille)"
-)
+st.subheader(f"Métriques du jour : {last_date_str} (dernier jour disponible vs veille)")
 
 col_day1, col_day2, col_day3, col_day4 = st.columns(4)
 with col_day1:
@@ -254,7 +254,7 @@ with col_day4:
 # MATRICE DE CONFUSION LIVE
 # ==========================================================
 st.markdown("---")
-st.subheader("📊 Matrice de confusion de production (temps réel)")
+st.subheader("Matrice de confusion de production (temps réel)")
 st.write(
     "Cette matrice de confusion montre les performances réelles du modèle champion en production basées sur toutes les transactions traitées."
 )
@@ -271,7 +271,7 @@ cm_df, _ = query_db("""
 if cm_df is not None and not cm_df.empty:
     cm_live = cm_df.iloc[0].to_dict()
 
-    c_cm_live1, c_cm_live2 = st.columns([1, 2])
+    c_cm_live1, c_cm_live2 = st.columns([1.2, 1.8])
     with c_cm_live1:
         st.markdown("#### Métriques Réelles en Direct")
         live_total = sum(cm_live.values())
@@ -295,22 +295,40 @@ if cm_df is not None and not cm_df.empty:
             else 0.0
         )
 
-        st.write(f"🎯 **Précision en direct :** `{live_prec:.4%}`")
-        st.write(f"📈 **Rappel (Recall) en direct :** `{live_rec:.4%}`")
-        st.write(f"🏆 **F2-Score en direct :** `{live_f2:.4f}`")
-        st.write(f"⚖️ **F1-Score en direct :** `{live_f1:.4f}`")
+        st.markdown(
+            f"""
+            - **Vrais Positifs (TP) :** `{live_tp:,}` (Fraudes interceptées)
+            - **Faux Positifs (FP) :** `{live_fp:,}` (Fausses alertes)
+            - **Vrais Négatifs (TN) :** `{live_tn:,}` (Transactions saines autorisées)
+            - **Faux Négatifs (FN) :** `{live_fn:,}` (Fraudes manquées)
+            """
+        )
+        st.write(f"**Précision en direct :** `{live_prec:.2%}`")
+        st.write(f"**Rappel (Recall) en direct :** `{live_rec:.2%}`")
+        st.write(f"**F2-Score en direct :** `{live_f2:.4f}`")
+        st.write(f"**F1-Score en direct :** `{live_f1:.4f}`")
 
     with c_cm_live2:
         z_live = [[cm_live["tn"], cm_live["fp"]], [cm_live["fn"], cm_live["tp"]]]
+        text_matrix = [
+            [f"TN : {cm_live['tn']:,}", f"FP : {cm_live['fp']:,}"],
+            [f"FN : {cm_live['fn']:,}", f"TP : {cm_live['tp']:,}"],
+        ]
         fig_live = px.imshow(
             z_live,
             x=["Sains Prédits (0)", "Fraudes Prédites (1)"],
             y=["Sains Réels (0)", "Fraudes Réelles (1)"],
             color_continuous_scale="Reds",
-            text_auto=True,
+            text_auto=False,
             title="Matrice de Confusion de Production (En Direct)",
         )
-        fig_live.update_layout(height=350, margin=dict(l=20, r=20, t=40, b=20))
+        fig_live.update_traces(
+            text=text_matrix,
+            texttemplate="%{text}",
+            hovertemplate="<b>Réel :</b> %{y}<br><b>Prédit :</b> %{x}<br><b>Valeur :</b> %{z:,}<extra></extra>",
+            textfont=dict(size=14),
+        )
+        fig_live.update_layout(height=360, margin=dict(l=20, r=20, t=40, b=20))
         st.plotly_chart(fig_live, use_container_width=True)
 
 # ==========================================================
@@ -318,7 +336,7 @@ if cm_df is not None and not cm_df.empty:
 # ==========================================================
 st.markdown("---")
 st.subheader(
-    "📈 Évolution temporelle des métriques en flux de production (Pas quotidien)"
+    " Évolution temporelle des métriques en flux de production (Pas quotidien)"
 )
 st.write(
     "Suivi continu des métriques de détection de fraude calculées au jour le jour sur les transactions réelles ingérées."
@@ -374,13 +392,13 @@ if df_daily_raw is not None and not df_daily_raw.empty:
     c_flt1, c_flt2, c_flt3 = st.columns([1.5, 2, 1.5])
     with c_flt1:
         time_range = st.selectbox(
-            "📅 Fenêtre temporelle",
+            "Fenêtre temporelle",
             ["7 derniers jours", "30 derniers jours", "Tout l'historique"],
             index=1,
         )
     with c_flt2:
         selected_metrics = st.multiselect(
-            "📊 Métriques à afficher",
+            "Métriques à afficher",
             [
                 "F1-Score Fraude",
                 "F2-Score Fraude",
@@ -395,7 +413,7 @@ if df_daily_raw is not None and not df_daily_raw.empty:
             ],
         )
     with c_flt3:
-        apply_rolling = st.checkbox("🔄 Lissage (Moyenne mobile 7j)", value=True)
+        apply_rolling = st.checkbox("Lissage (Moyenne mobile 7j)", value=True)
 
     # Filtrage temporel
     max_date = df_daily["jour"].max()
@@ -522,7 +540,7 @@ if df_daily_raw is not None and not df_daily_raw.empty:
     fig_bars.update_layout(
         barmode="group",
         title=dict(
-            text="📊 Volumes Quotidiens : Détections Réussies vs Erreurs",
+            text="Volumes Quotidiens : Détections Réussies vs Erreurs",
             y=0.98,
             x=0,
             xanchor="left",
@@ -555,6 +573,13 @@ if df_daily_raw is not None and not df_daily_raw.empty:
                     lbl += " (GRL)"
                 elif "v12" in m_raw.lower():
                     lbl += " (Champion V12)"
+                elif "v28" in m_raw.lower():
+                    lbl += " (Champion V28)"
+                elif champion_run_id and (
+                    str(r_mod["model_version"]) in str(champion_run_id)
+                    or str(champion_run_id) in str(r_mod["model_version"])
+                ):
+                    lbl += " (Champion Actuel)"
                 c = colors[idx % len(colors)]
                 date_str = m_date.strftime("%Y-%m-%d")
 
@@ -576,7 +601,7 @@ if df_daily_raw is not None and not df_daily_raw.empty:
                     x=date_str,
                     y=1.02,
                     yref="paper",
-                    text=f"<b>📌 {lbl}</b>",
+                    text=f"<b> {lbl}</b>",
                     showarrow=False,
                     xanchor=anchor_pos,
                     yanchor="bottom",
@@ -601,7 +626,7 @@ if df_daily_raw is not None and not df_daily_raw.empty:
                     x=date_str,
                     y=1.02,
                     yref="paper",
-                    text=f"<b>📌 {lbl}</b>",
+                    text=f"<b> {lbl}</b>",
                     showarrow=False,
                     xanchor=anchor_pos,
                     yanchor="bottom",
@@ -614,7 +639,7 @@ if df_daily_raw is not None and not df_daily_raw.empty:
 
     fig_time.update_layout(
         title=dict(
-            text="📈 Évolution Quotidienne des Métriques (Flux de Production)",
+            text=" Évolution Quotidienne des Métriques (Flux de Production)",
             y=0.98,
             x=0,
             xanchor="left",
@@ -631,7 +656,7 @@ if df_daily_raw is not None and not df_daily_raw.empty:
     )
     st.plotly_chart(fig_time, use_container_width=True)
 
-    with st.expander("📊 Détail quotidien des volumes de détection (TP, FP, FN)"):
+    with st.expander("Détail quotidien des volumes de détection (TP, FP, FN)"):
         st.plotly_chart(fig_bars, use_container_width=True)
 else:
     st.info("Aucune donnée de prédiction historique trouvée dans la base PostgreSQL.")

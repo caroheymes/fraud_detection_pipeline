@@ -40,8 +40,11 @@ api_module.model_pipeline = dummy_pipeline
 api_module.model_run_id = "test_xgb_champion_v1"
 api_module.db_engine = MagicMock()
 
-# Mock de Redis pour retourner des règles configurées
+# Mock de Redis pour retourner des règles configurées et gérer les pipelines de vélocité
 mock_redis = MagicMock()
+mock_pipe = MagicMock()
+mock_pipe.execute.return_value = [2, True]
+mock_redis.pipeline.return_value = mock_pipe
 mock_redis.get.return_value = json.dumps(
     {
         "thresholds": {
@@ -49,6 +52,7 @@ mock_redis.get.return_value = json.dumps(
             "distance_achat_max": 50.0,
             "age_max": 38.0,
             "city_pop_max": 3600.0,
+            "user_daily_tx_count_max": 3,
         },
         "suspicious_categories": ["travel", "food_dining"],
         "suspicious_hours": [3, 22, 23],
@@ -219,3 +223,115 @@ def test_ingest_parallel_requests():
         data = response.json()
         assert data["status"] == "success"
         assert len(data["predictions"]) == 1
+
+
+def test_user_velocity_and_hash_pseudonymization():
+    """Valide le hachage HMAC RGPD et la restitution de la vélocité utilisateur."""
+    from src.utils.features import compute_user_hash
+
+    # 1. Vérification de l'idempotence et du masquage des données nominatives
+    h1 = compute_user_hash("Caro", "MS", "1985-04-12")
+    h2 = compute_user_hash("Caro", "MS", "1985-04-12")
+    h3 = compute_user_hash("Autre", "Client", "1990-01-01")
+
+    assert h1 == h2
+    assert h1 != h3
+    assert len(h1) == 64  # SHA-256 hex string
+
+    # 2. Vérification que /predict_batch retourne la feature de vélocité
+    payload = {
+        "transactions": [
+            {
+                "trans_date_trans_time": "2020-07-22 14:05:00",
+                "cc_num": 423578912345,
+                "merchant": "fraud_gas_station",
+                "category": "gas_transport",
+                "amt": 85.50,
+                "first": "Caro",
+                "last": "MS",
+                "gender": "F",
+                "street": "12 rue de la Paix",
+                "city": "Lyon",
+                "state": "Rhone",
+                "zip": 69000,
+                "lat": 45.764043,
+                "long": 4.835659,
+                "city_pop": 513000,
+                "job": "Data Ingé",
+                "dob": "1985-04-12",
+                "trans_num": "test_velocity_tx_001",
+                "unix_time": 1595426700,
+                "merch_lat": 45.768000,
+                "merch_long": 4.840000,
+                "is_fraud": 0,
+            }
+        ]
+    }
+    response = client.post("/predict_batch", json=payload)
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["status"] == "success"
+    assert "user_daily_tx_count" in res_data["predictions"][0]
+    assert res_data["predictions"][0]["user_daily_tx_count"] == 2  # mock_pipe returns 2
+
+
+def test_user_velocity_redis_fallback():
+    """Vérifie que la fonction de vélocité retourne 1 par défaut en cas d'absence ou panne de Redis."""
+    from src.api.main import get_and_increment_user_velocity
+
+    # 1. Cas sans connexion Redis
+    res_none = get_and_increment_user_velocity("test_user_hash_123", "2020-07-22", redis_conn=None)
+    assert res_none == 1
+
+    # 2. Cas avec exception levée par Redis
+    failing_redis = MagicMock()
+    failing_redis.pipeline.side_effect = RuntimeError("Redis connection lost")
+    res_err = get_and_increment_user_velocity("test_user_hash_123", "2020-07-22", redis_conn=failing_redis)
+    assert res_err == 1
+
+
+def test_predict_batch_inference_error():
+    """Vérifie que l'API renvoie un payload d'erreur clair lors d'un échec d'inférence du modèle."""
+    failing_model = MagicMock()
+    failing_model.predict_proba.side_effect = RuntimeError("Inference tensor shape mismatch")
+
+    original_pipeline = api_module.model_pipeline
+    api_module.model_pipeline = failing_model
+    try:
+        payload = {
+            "transactions": [
+                {
+                    "trans_date_trans_time": "2020-07-22 14:05:00",
+                    "cc_num": 423578912345,
+                    "merchant": "fraud_gas_station",
+                    "category": "gas_transport",
+                    "amt": 85.50,
+                    "first": "Caro",
+                    "last": "MS",
+                    "gender": "F",
+                    "street": "12 rue de la Paix",
+                    "city": "Lyon",
+                    "state": "Rhone",
+                    "zip": 69000,
+                    "lat": 45.764043,
+                    "long": 4.835659,
+                    "city_pop": 513000,
+                    "job": "Data Ingé",
+                    "dob": "1985-04-12",
+                    "trans_num": "test_err_tx_001",
+                    "unix_time": 1595426700,
+                    "merch_lat": 45.768000,
+                    "merch_long": 4.840000,
+                    "is_fraud": 0,
+                }
+            ]
+        }
+        response = client.post("/predict_batch", json=payload)
+        assert response.status_code == 200
+        res_data = response.json()
+        assert res_data["status"] == "error"
+        assert "message" in res_data
+        assert "Inference tensor shape mismatch" in res_data["message"]
+    finally:
+        api_module.model_pipeline = original_pipeline
+

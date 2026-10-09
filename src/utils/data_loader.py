@@ -9,6 +9,12 @@ le feature engineering unifié et le filtrage des outliers.
 from __future__ import annotations
 
 import os
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)
 
 import pandas as pd
 from sqlalchemy import text
@@ -84,67 +90,76 @@ def load_dataset(
                             "trans_date_trans_time"
                         ].dt.tz_localize(None)
                 print(
-                    f"📁 PostgreSQL connecté : {len(df_pg):,} transactions récentes (Date max: {max_db_date})."
+                    f" PostgreSQL connecté : {len(df_pg):,} transactions récentes (Date max: {max_db_date})."
                 )
     except Exception as e:
-        print(f"ℹ️ PostgreSQL non accessible ({e}), utilisation du fichier CSV seul.")
+        print(f" PostgreSQL non accessible ({e}), utilisation du fichier CSV seul.")
 
     # 2. Fusion de l'historique de base et des données streaming
     if df_csv is not None and df_pg is not None and max_db_date is not None:
         # Données synchronisées avec la date max de PostgreSQL
         df_csv_filtered = df_csv[df_csv["trans_date_trans_time"] <= max_db_date]
-        df_combined = pd.concat([df_csv_filtered, df_pg], ignore_index=True)
-        if "trans_num" in df_combined.columns:
-            df_combined = df_combined.drop_duplicates(subset=["trans_num"], keep="last")
+        df = pd.concat([df_csv_filtered, df_pg], ignore_index=True)
+        if "trans_num" in df.columns:
+            df = df.drop_duplicates(subset=["trans_num"], keep="last")
         else:
-            df_combined = df_combined.drop_duplicates()
+            df = df.drop_duplicates()
 
-        # Si l'utilisateur demande explicitement un volume supérieur au périmètre PostgreSQL (ex: sample_size=200000)
-        if sample_size > len(df_combined) and len(df_csv) > len(df_combined):
+        # Si l'utilisateur demande un volume supérieur au périmètre PostgreSQL (ex: sample_size=500000)
+        if sample_size > len(df) and len(df_csv) > len(df):
             print(
-                f"ℹ️ Volume demandé ({sample_size:,} lignes) supérieur au périmètre PostgreSQL ({len(df_combined):,}). "
-                f"Extension automatique sur l'historique complet fraudTest.csv ({len(df_csv):,} lignes disponibles)."
+                f" Volume demandé ({sample_size:,} lignes) supérieur au périmètre PostgreSQL ({len(df):,}). "
+                f"Extension automatique sur l'historique complet fraudTest.csv ({len(df_csv):,} lignes disponibles).",
+                flush=True,
             )
-            df_combined_full = pd.concat([df_csv, df_pg], ignore_index=True)
-            if "trans_num" in df_combined_full.columns:
-                df = df_combined_full.drop_duplicates(subset=["trans_num"], keep="last")
+            df = pd.concat([df_csv, df_pg], ignore_index=True)
+            if "trans_num" in df.columns:
+                df = df.drop_duplicates(subset=["trans_num"], keep="last")
             else:
-                df = df_combined_full.drop_duplicates()
+                df = df.drop_duplicates()
         else:
-            df = df_combined
             print(
-                f"📚 Fusion synchronisée : Historique ({df_csv['trans_date_trans_time'].min().date()} -> {max_db_date.date()}) = {len(df):,} transactions disponibles."
+                f" Fusion synchronisée : Historique ({df_csv['trans_date_trans_time'].min().date()} -> {max_db_date.date()}) = {len(df):,} transactions disponibles.",
+                flush=True,
             )
+        del df_csv_filtered
+        del df_pg
+        del df_csv
     elif df_pg is not None and len(df_pg) > 0:
         df = df_pg
     elif df_csv is not None:
         df = df_csv
     else:
         raise FileNotFoundError(
-            "❌ Impossible de charger les données : ni PostgreSQL ni fraudTest.csv ne sont accessibles."
+            " Impossible de charger les données : ni PostgreSQL ni fraudTest.csv ne sont accessibles."
         )
 
-    # 3. Tri chronologique
-    df = df.copy()
+    # 3. Tri chronologique et échantillonnage
+    import gc
+
     if "trans_date_trans_time" in df.columns:
         df["trans_date_trans_time"] = pd.to_datetime(df["trans_date_trans_time"])
-        df = df.sort_values("trans_date_trans_time").reset_index(drop=True)
+        df.sort_values("trans_date_trans_time", inplace=True)
+        df.reset_index(drop=True, inplace=True)
 
     # 4. Échantillonnage chronologique ou aléatoire
     if 0 < sample_size < len(df):
         if sample_position == "last":
             print(
-                f"📅 Échantillonnage chronologique : {sample_size:,} DERNIÈRES transactions (les plus récentes)..."
+                f" Échantillonnage chronologique : {sample_size:,} DERNIÈRES transactions (les plus récentes)...",
+                flush=True,
             )
             df = df.iloc[-sample_size:].reset_index(drop=True)
         elif sample_position == "first":
             print(
-                f"📅 Échantillonnage chronologique : {sample_size:,} PREMIÈRES transactions (les plus anciennes)..."
+                f" Échantillonnage chronologique : {sample_size:,} PREMIÈRES transactions (les plus anciennes)...",
+                flush=True,
             )
             df = df.iloc[:sample_size].reset_index(drop=True)
         else:
             print(
-                f"🎲 Échantillonnage aléatoire : {sample_size:,} transactions (seed=42)..."
+                f" Échantillonnage aléatoire : {sample_size:,} transactions (seed=42)...",
+                flush=True,
             )
             df = (
                 df.sample(n=sample_size, random_state=42)
@@ -152,12 +167,15 @@ def load_dataset(
                 .reset_index(drop=True)
             )
 
-    # 5. Feature Engineering unifié
+    gc.collect()
+
+    # 5. Feature Engineering unifié sur l'échantillon ciblé
     df = prepare_features(df, include_graph_ids=include_graph_ids)
 
     # 6. Tri chronologique final
     if "trans_date_trans_time" in df.columns:
-        df = df.sort_values("trans_date_trans_time").reset_index(drop=True)
+        df.sort_values("trans_date_trans_time", inplace=True)
+        df.reset_index(drop=True, inplace=True)
 
     fraud_col = "fraud_label" if "fraud_label" in df.columns else "is_fraud"
     fraud_count = df[fraud_col].sum() if fraud_col in df.columns else 0
@@ -170,6 +188,7 @@ def load_dataset(
         date_range_info = f" [du {d_min} au {d_max}]"
 
     print(
-        f"✅ Données prêtes : {df.shape}{date_range_info} (dont {fraud_count:,} fraudes, {fraud_pct:.3f}%)"
+        f" Données prêtes : {df.shape}{date_range_info} (dont {fraud_count:,} fraudes, {fraud_pct:.3f}%)",
+        flush=True,
     )
     return df

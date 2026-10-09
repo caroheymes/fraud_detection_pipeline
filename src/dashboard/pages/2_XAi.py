@@ -12,17 +12,23 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from src.dashboard.theme import apply_theme
 from src.utils.db import get_postgres_engine
-from src.utils.features import haversine_vectorized
+from src.utils.features import (
+    BASE_FEATURE_COLUMNS,
+    FEATURE_GROUPS,
+    FEATURE_LABELS,
+    prepare_features,
+)
 from src.utils.mlflow_manager import load_champion_model
 
 st.set_page_config(
     page_title="Explicabilité Shapash & performances du champion",
-    page_icon="🔍",
     layout="wide",
 )
+apply_theme()
 
-st.title("🔍 Explicabilité Shapash & performances du champion")
+st.title("XAi - EXPLICABILITE")
 st.markdown("---")
 
 mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
@@ -44,11 +50,13 @@ def get_hybrid_explain_sample():
     if not os.path.exists(ref_path):
         ref_path = os.path.join(project_root, "src/training/reference_data.csv")
     df_ref = pd.read_csv(ref_path)
-    df_ref["trans_date_trans_time"] = pd.to_datetime(
-        df_ref["trans_date_trans_time"]
-    ).dt.tz_localize(None)
+    if "trans_date_trans_time" in df_ref.columns:
+        df_ref["trans_date_trans_time"] = pd.to_datetime(
+            df_ref["trans_date_trans_time"]
+        ).dt.tz_localize(None)
     if "dob" in df_ref.columns:
         df_ref["dob"] = pd.to_datetime(df_ref["dob"]).dt.tz_localize(None)
+    df_ref = prepare_features(df_ref, include_graph_ids=False)
 
     # 2. Récupérer les données réelles des 30 derniers jours de PostgreSQL
     db_query = """
@@ -59,29 +67,14 @@ def get_hybrid_explain_sample():
 
     if df_prod is not None and not df_prod.empty:
         # Formater les colonnes temporelles en tz-naive pour compatibilité concat
-        df_prod["trans_date_trans_time"] = pd.to_datetime(
-            df_prod["trans_date_trans_time"]
-        ).dt.tz_localize(None)
+        if "trans_date_trans_time" in df_prod.columns:
+            df_prod["trans_date_trans_time"] = pd.to_datetime(
+                df_prod["trans_date_trans_time"]
+            ).dt.tz_localize(None)
         if "dob" in df_prod.columns:
             df_prod["dob"] = pd.to_datetime(df_prod["dob"]).dt.tz_localize(None)
 
-        # Calculer à la volée les variables requises par le modèle
-        df_prod["age"] = (
-            df_prod["trans_date_trans_time"].dt.year - df_prod["dob"].dt.year
-        )
-        df_prod["distance_achat"] = haversine_vectorized(
-            df_prod["lat"].astype(float),
-            df_prod["long"].astype(float),
-            df_prod["merch_lat"].astype(float),
-            df_prod["merch_long"].astype(float),
-        )
-        dt_col = df_prod["trans_date_trans_time"]
-        df_prod["hour_sin"] = np.sin(2 * np.pi * dt_col.dt.hour / 24.0)
-        df_prod["hour_cos"] = np.cos(2 * np.pi * dt_col.dt.hour / 24.0)
-        df_prod["weekday_sin"] = np.sin(2 * np.pi * dt_col.dt.dayofweek / 7.0)
-        df_prod["weekday_cos"] = np.cos(2 * np.pi * dt_col.dt.dayofweek / 7.0)
-        df_prod["month_sin"] = np.sin(2 * np.pi * dt_col.dt.month / 12.0)
-        df_prod["month_cos"] = np.cos(2 * np.pi * dt_col.dt.month / 12.0)
+        df_prod = prepare_features(df_prod, include_graph_ids=False)
 
         # Déduplication préalable de df_prod
         df_prod = df_prod.drop_duplicates(subset=["trans_num"])
@@ -192,11 +185,24 @@ def _extract_model_predictor_and_xenc(model, df_sample, X_samp, features_groups)
         cols = emb_cols + vec_cols
         X_enc = pd.DataFrame(X_enc_arr, columns=cols)
         features_groups["Embeddings Réseau Graphe (HinSAGE)"] = emb_cols
-        preprocessor = model.hinsage.vectorizer
-        predictor = model.classifier
+    elif hasattr(model, "iso_forest"):
+        df_prep = prepare_features(df_sample, include_graph_ids=False)
+        present_cols = [c for c in BASE_FEATURE_COLUMNS if c in df_prep.columns]
+        X_in = df_prep[present_cols]
+        X_enc_arr = model.transform(X_in)
+        try:
+            cols = list(model.get_feature_names_out())
+        except Exception:
+            cols = [f"feat_{i}" for i in range(X_enc_arr.shape[1])]
+        X_enc = pd.DataFrame(X_enc_arr, columns=cols)
+        features_groups["Détection d'Anomalies (Isolation Forest)"] = [
+            c for c in cols if "iso_forest" in c
+        ]
+        preprocessor = model.vectorizer
+        predictor = getattr(model, "classifier", getattr(model, "xgb_model", model))
     else:
         preprocessor = None
-        predictor = getattr(model, "classifier", model)
+        predictor = getattr(model, "classifier", getattr(model, "xgb_model", model))
         X_enc = X_samp.copy()
         cols = X_samp.columns.tolist()
 
@@ -211,19 +217,8 @@ def load_shapash_explainer(version_key: str):
     champion_metrics = {}
     champion_params = {}
 
-    features_groups = {
-        "Heure": ["hour_sin", "hour_cos"],
-        "Jour de la semaine": ["weekday_sin", "weekday_cos"],
-        "Mois de l'année": ["month_sin", "month_cos"],
-    }
-    features_dict = {
-        "amt": "Montant (€)",
-        "distance_achat": "Distance d'achat (km)",
-        "age": "Âge du client",
-        "city_pop": "Population de la ville",
-        "category": "Catégorie d'achat",
-        "gender": "Genre",
-    }
+    features_groups = dict(FEATURE_GROUPS)
+    features_dict = dict(FEATURE_LABELS)
 
     try:
         client = MlflowClient()
@@ -249,18 +244,7 @@ def load_shapash_explainer(version_key: str):
             )
 
         features_list = [
-            "category",
-            "amt",
-            "gender",
-            "distance_achat",
-            "age",
-            "city_pop",
-            "hour_sin",
-            "hour_cos",
-            "weekday_sin",
-            "weekday_cos",
-            "month_sin",
-            "month_cos",
+            c for c in BASE_FEATURE_COLUMNS if c in df_sample_resorted.columns
         ]
         X_samp = df_sample_resorted[features_list]
         y_samp = df_sample_resorted["is_fraud"]
@@ -359,18 +343,7 @@ def load_shapash_explainer(version_key: str):
                     ].astype(str)
 
                 features_list = [
-                    "category",
-                    "amt",
-                    "gender",
-                    "distance_achat",
-                    "age",
-                    "city_pop",
-                    "hour_sin",
-                    "hour_cos",
-                    "weekday_sin",
-                    "weekday_cos",
-                    "month_sin",
-                    "month_cos",
+                    c for c in BASE_FEATURE_COLUMNS if c in df_sample_resorted.columns
                 ]
                 X_samp = df_sample_resorted[features_list]
                 y_samp = df_sample_resorted["is_fraud"]
@@ -466,25 +439,25 @@ if xpl is not None:
         family_title = (
             f"Inductive Graph Representation Learning (HinSAGE + {predictor_cls})"
         )
-        family_icon = "🧠"
+        family_icon = ""
         family_desc = "Modélisation sur graphe tripartite hétérogène (*Clients ↔ Transactions ↔ Marchands*) avec agrégation de voisinage 2-hop et classification aval avec Focal Loss."
     elif any(
         k in predictor_cls for k in ["XGB", "Gradient", "LGBM", "CatBoost", "Hist"]
     ):
         family_title = f"Gradient Boosted Decision Trees ({predictor_cls})"
-        family_icon = "🌲"
+        family_icon = ""
         family_desc = "Ensemble d'arbres de décision boostés séquentiellement, optimisant la fonction de perte avec régularisation et gestion des classes déséquilibrées."
     elif any(k in predictor_cls for k in ["Forest", "Tree", "ExtraTrees"]):
         family_title = f"Ensemble d'Arbres Aléatoires ({predictor_cls})"
-        family_icon = "🌳"
+        family_icon = ""
         family_desc = "Forêt d'arbres de décision indépendants avec agrégation par vote majoritaire et pondération de classes."
     elif any(k in predictor_cls for k in ["Logistic", "Linear", "SGD", "Ridge"]):
         family_title = f"Modèle Linéaire Supervisé ({predictor_cls})"
-        family_icon = "📐"
+        family_icon = ""
         family_desc = "Modèle linéaire probabiliste avec pénalité de régularisation et calibration de seuil de décision."
     else:
         family_title = f"Classifieur Supervisé ({predictor_cls})"
-        family_icon = "⚙️"
+        family_icon = ""
         family_desc = f"Modèle supervisé Scikit-Learn avec pipeline de prétraitement {preprocessor_cls}."
 
     # Les variables cycliques (sin/cos) sont regroupées nativement par Shapash grâce à l'argument features_groups
@@ -494,9 +467,7 @@ if xpl is not None:
     available_features += ["Heure", "Jour de la semaine", "Mois de l'année"]
 
     # SECTION A : PERFORMANCES & CARACTÉRISTIQUES DU MODÈLE CHAMPION
-    st.markdown(
-        f"### 📊 Performances & Caractéristiques du modèle champion ({ver_label})"
-    )
+    st.markdown(f"### Performances & Caractéristiques du modèle champion ({ver_label})")
 
     # Bannière adaptative
     if is_gnn:
@@ -530,11 +501,11 @@ if xpl is not None:
 
     # Spécifications détaillées et adaptatives du modèle
     with st.expander(
-        "⚙️ Fiche technique détaillée & Hyperparamètres du champion", expanded=True
+        "Fiche technique détaillée & Hyperparamètres du champion", expanded=True
     ):
         c_spec1, c_spec2 = st.columns(2)
         with c_spec1:
-            st.markdown("#### 🏗️ Pipeline & Encodage")
+            st.markdown("#### Pipeline & Encodage")
             st.write(f"• **Algorithme Principal :** `{predictor_cls}`")
             st.write(f"• **Préprocesseur :** `{preprocessor_cls}`")
             if is_gnn:
@@ -558,7 +529,7 @@ if xpl is not None:
             st.write(f"• **Nom du Run :** `{run_name}`")
 
         with c_spec2:
-            st.markdown("#### 🎛️ Hyperparamètres Enregistrés")
+            st.markdown("#### Hyperparamètres Enregistrés")
             if params:
                 for param_k, param_v in sorted(params.items()):
                     try:
@@ -577,12 +548,12 @@ if xpl is not None:
 
     # SECTION B : GLOBAL FEATURE IMPORTANCE PLOT
     st.markdown(
-        "### 📈 1. Importance globale des caractéristiques (global feature importance)"
+        "### 1. Importance globale des caractéristiques (global feature importance)"
     )
 
     st.markdown(
         r"""
-        > 💡 **Note de lisibilité sur les caractéristiques cycliques (temps) :**
+        >  **Note de lisibilité sur les caractéristiques cycliques (temps) :**
         > Afin de permettre au modèle ML de comprendre la continuité temporelle (par exemple, le fait que 23h et 00h soient consécutifs), les variables temporelles ont été encodées en deux indicateurs cycliques : sinus ($\sin$) et cosinus ($\cos$).
         > 
         > Pour rendre les graphiques interprétables par un humain, nous appliquons la **transformation inverse** (décodage) à l'aide de la fonction **arc tangente à deux variables ($\operatorname{arctan2}$)** pour reconstruire la valeur d'origine :
@@ -590,9 +561,9 @@ if xpl is not None:
         > $$\theta = \operatorname{arctan2}(\sin(x), \cos(x)) \pmod{2\pi}$$
         > 
         > Cette valeur angulaire $\theta$ (exprimée en radians entre $0$ et $2\pi$) est ensuite convertie dans son unité d'origine :
-        > * 🕒 **Heure** : $\text{heure} = \text{round}\left(\theta \times \frac{24}{2\pi}\right) \pmod{24}$
-        > * 📅 **Jour de la semaine** : $\text{jour} = \text{round}\left(\theta \times \frac{7}{2\pi}\right) \pmod{7}$ (Lundi = 0, Dimanche = 6)
-        > * 📆 **Mois de l'année** : $\text{mois} = \text{round}\left(\theta \times \frac{12}{2\pi}\right)$ (Janvier = 1, Décembre = 12)
+        > *  **Heure** : $\text{heure} = \text{round}\left(\theta \times \frac{24}{2\pi}\right) \pmod{24}$
+        > *  **Jour de la semaine** : $\text{jour} = \text{round}\left(\theta \times \frac{7}{2\pi}\right) \pmod{7}$ (Lundi = 0, Dimanche = 6)
+        > *  **Mois de l'année** : $\text{mois} = \text{round}\left(\theta \times \frac{12}{2\pi}\right)$ (Janvier = 1, Décembre = 12)
         """
     )
     st.write(
@@ -605,7 +576,7 @@ if xpl is not None:
 
     # SECTION C : FEATURES CONTRIBUTION PLOTS
     st.markdown(
-        "### 📈 2. Courbes de contribution individuelle (features contribution plots)"
+        "### 2. Courbes de contribution individuelle (features contribution plots)"
     )
     st.write(
         "Ces courbes affichent l'impact d'une caractéristique spécifique sur le score de fraude. Elles permettent de voir si des montants ou distances plus élevés augmentent le score de suspicion."
@@ -622,7 +593,7 @@ if xpl is not None:
     st.markdown("---")
 
     # SECTION D : TRANSFORMATION INVERSE
-    st.markdown("### 🔄 3. Transformation inverse (décodage des variables cycliques)")
+    st.markdown("### 3. Transformation inverse (décodage des variables cycliques)")
     st.write(
         "Le modèle champion utilise des features cycliques trigonométriques pour comprendre le temps. Ci-dessous, l'outil décode ces valeurs en coordonnées d'origine (Heure, Jour de la semaine, Mois)."
     )
@@ -699,7 +670,7 @@ if xpl is not None:
     st.markdown("---")
 
     # SECTION E : LOCAL EXPLANATION (Waterfall)
-    st.markdown("### 👤 4. Explication locale de la transaction")
+    st.markdown("### 4. Explication locale de la transaction")
     st.write(
         "Ce graphique montre le détail des contributions SHAP pour la transaction sélectionnée ci-dessus."
     )
@@ -707,21 +678,21 @@ if xpl is not None:
     col_local_details, col_local_plot = st.columns([1, 2])
     with col_local_details:
         st.markdown("##### Paramètres d'Entrée")
-        st.write(f"🆔 **ID Transaction :** `{tx_inv['trans_num']}`")
+        st.write(f" **ID Transaction :** `{tx_inv['trans_num']}`")
         import hashlib
 
         cc_hash = hashlib.sha256(str(tx_inv["cc_num"]).encode()).hexdigest()
-        st.write(f"💳 **Carte (SHA-256) :** `{cc_hash[:16]}...`")
-        st.write(f"💰 **Montant :** `{tx_inv['amt']} €`")
-        st.write(f"🛍️ **Catégorie :** `{tx_inv['category']}`")
-        st.write(f"🗺️ **Distance :** `{tx_inv['distance_achat']:.2f} km`")
-        st.write(f"👤 **Âge/Genre :** `{tx_inv['age']} ans` (`{tx_inv['gender']}`)")
-        st.write(f"🏙️ **Population :** `{tx_inv['city_pop']} hab.`")
+        st.write(f" **Carte (SHA-256) :** `{cc_hash[:16]}...`")
+        st.write(f" **Montant :** `{tx_inv['amt']} €`")
+        st.write(f" **Catégorie :** `{tx_inv['category']}`")
+        st.write(f" **Distance :** `{tx_inv['distance_achat']:.2f} km`")
+        st.write(f" **Âge/Genre :** `{tx_inv['age']} ans` (`{tx_inv['gender']}`)")
+        st.write(f" **Population :** `{tx_inv['city_pop']} hab.`")
 
         if tx_inv["is_fraud"] == 1:
-            st.error("🚨 FRAUDE RÉELLE")
+            st.error("FRAUDE RÉELLE")
         else:
-            st.success("✅ SAINE RÉELLE")
+            st.success("SAINE RÉELLE")
 
     with col_local_plot:
         tx_id = tx_inv["trans_num"]

@@ -63,6 +63,7 @@ def parse_args():
             "recall",
             "precision",
             "cost_sensitive",
+            "brier",
         ],
         help="Métrique cible pour l'optimisation et le Quality Gate (défaut: f2)",
     )
@@ -71,6 +72,13 @@ def parse_args():
         type=float,
         default=0.0,
         help="Ratio de sur-échantillonnage de la fraude (défaut: 0.0)",
+    )
+    parser.add_argument(
+        "--sample-position",
+        type=str,
+        default="last",
+        choices=["last", "first", "random"],
+        help="Mode d'échantillonnage : 'last' (défaut), 'first' ou 'random'",
     )
     parser.add_argument(
         "--model-name",
@@ -85,15 +93,17 @@ def main():
     args = parse_args()
 
     print("=" * 80)
-    print("🚀 PIPELINE HYBRIDE AUTO-ENCODEUR + XGBOOST")
+    print(" PIPELINE HYBRIDE AUTO-ENCODEUR + XGBOOST")
     print(
-        f"   Configuration : n_trials={args.n_trials}, sample_size={args.sample_size}"
+        f"   Configuration : n_trials={args.n_trials}, sample_size={args.sample_size}, sample_position={args.sample_position}"
     )
     print(f"   Métrique cible : {args.metric_target.upper()}")
     print("=" * 80)
 
     # 1. Chargement des données unifiées
-    df = load_dataset(sample_size=args.sample_size, sample_position="last")
+    df = load_dataset(
+        sample_size=args.sample_size, sample_position=args.sample_position
+    )
     target_col = "is_fraud" if "is_fraud" in df.columns else "fraud_label"
     if target_col not in df.columns:
         raise ValueError(f"Colonne cible introuvable ({df.columns})")
@@ -110,12 +120,12 @@ def main():
     y_test = test_df[target_col].astype(int)
 
     print(
-        f"\n📊 Répartition des données : Train={len(train_df):,} ({y_train.sum():,} fraudes), Test={len(test_df):,} ({y_test.sum():,} fraudes)"
+        f"\n Répartition des données : Train={len(train_df):,} ({y_train.sum():,} fraudes), Test={len(test_df):,} ({y_test.sum():,} fraudes)"
     )
 
     # 3. Pré-entraînement rapide de l'Auto-encodeur sur le Train pour extraction vectorisée
     print(
-        "\n🧠 Phase 1 : Entraînement de l'Auto-encodeur de référence sur transactions saines..."
+        "\n Phase 1 : Entraînement de l'Auto-encodeur de référence sur transactions saines..."
     )
     ae_extractor = AutoencoderFeatureLearner(
         hidden_dim=64,
@@ -128,7 +138,7 @@ def main():
     X_train_enriched = ae_extractor.fit_transform(X_train, y_train)
     X_test_enriched = ae_extractor.transform(X_test)
     print(
-        f"✅ Features enrichies générées : {X_train_enriched.shape[1]} dimensions (Tabulaires + MSE + Log-MSE + Z-Score + Embeddings Latents)."
+        f" Features enrichies générées : {X_train_enriched.shape[1]} dimensions (Tabulaires + MSE + Log-MSE + Z-Score + Embeddings Latents)."
     )
 
     best_xgb_params = {
@@ -146,7 +156,7 @@ def main():
     # 4. Optimisation Bayésienne Optuna sur les représentations enrichies
     if args.n_trials > 1:
         print(
-            f"\n🎯 Phase 2 : Optimisation Bayésienne Optuna ({args.n_trials} essais)..."
+            f"\n Phase 2 : Optimisation Bayésienne Optuna ({args.n_trials} essais)..."
         )
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -172,7 +182,7 @@ def main():
 
             trial_start = datetime.now()
             print(
-                f"⏳ [ESSAI {trial.number + 1}/{args.n_trials}] "
+                f" [ESSAI {trial.number + 1}/{args.n_trials}] "
                 f"n_est={xgb_p['n_estimators']}, depth={xgb_p['max_depth']}, lr={xgb_p['learning_rate']:.3f}, scale_pos={xgb_p['scale_pos_weight']}...",
                 end="",
                 flush=True,
@@ -215,16 +225,19 @@ def main():
                     mlflow.log_params(trial.params)
                     mlflow.log_metric(f"mean_{args.metric_target}", trial.value)
 
-            study = optuna.create_study(direction="maximize")
+            is_minimize = args.metric_target.lower() in ["brier", "brier_score"]
+            study = optuna.create_study(
+                direction="minimize" if is_minimize else "maximize"
+            )
             study.optimize(
                 objective, n_trials=args.n_trials, callbacks=[mlflow_callback]
             )
 
             print("\n" + "=" * 60)
             print(
-                f"🏆 Meilleur Score Optuna ({args.metric_target.upper()}) : {study.best_value:.4f}"
+                f" Meilleur Score Optuna ({args.metric_target.upper()}) : {study.best_value:.4f}"
             )
-            print("🌟 Meilleurs Hyperparamètres :")
+            print(" Meilleurs Hyperparamètres :")
             for k, v in study.best_params.items():
                 print(f"   • {k}: {v}")
             print("=" * 60)
@@ -232,7 +245,7 @@ def main():
 
     # 5. Calibration finale du seuil par CV
     print(
-        f"\n🔍 Calibration finale du seuil optimal par CV (Métrique: {args.metric_target.upper()})..."
+        f"\n Calibration finale du seuil optimal par CV (Métrique: {args.metric_target.upper()})..."
     )
     skf = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
     cv_thresholds = []
@@ -251,10 +264,10 @@ def main():
         cv_thresholds.append(t_opt)
 
     opt_threshold = float(np.median(cv_thresholds))
-    print(f"🎯 Seuil de décision optimal calibré : {opt_threshold:.4f}")
+    print(f" Seuil de décision optimal calibré : {opt_threshold:.4f}")
 
     # 6. Construction et entraînement du pipeline complet Scikit-Learn
-    print("\n📦 Construction du pipeline hybride sérialisable...")
+    print("\n Construction du pipeline hybride sérialisable...")
     pipeline = AutoencoderXGBoostPipeline(
         hidden_dim=64,
         latent_dim=8,
@@ -267,14 +280,14 @@ def main():
     pipeline.fit(X_train, y_train)
 
     # 7. Évaluation sur le jeu de test holdout
-    print("\n📈 Évaluation sur le jeu de test holdout...")
+    print("\n Évaluation sur le jeu de test holdout...")
     y_test_probas = pipeline.predict_proba(X_test)[:, 1]
     metrics, cm = evaluate_predictions_and_curves(
         y_test, y_test_probas, threshold=opt_threshold
     )
 
     print("\n" + "-" * 60)
-    print("📋 RÉSULTATS SUR LE JEU DE TEST (HOLD-OUT) :")
+    print(" RÉSULTATS SUR LE JEU DE TEST (HOLD-OUT) :")
     print(f"   • Seuil Opérationnel (decision_threshold) : {opt_threshold:.4f}")
     print(f"   • AUPRC / PR-AUC                          : {metrics['auprc']:.4f}")
     print(f"   • ROC-AUC                                 : {metrics['roc_auc']:.4f}")
@@ -324,11 +337,11 @@ def main():
 
     if promoted:
         print(
-            "\n👑 Modèle Hybride Auto-encodeur + XGBoost promu Champion ! Rechargement de l'API..."
+            "\n Modèle Hybride Auto-encodeur + XGBoost promu Champion ! Rechargement de l'API..."
         )
         reload_serving_api()
 
-    print("\n🏁 Processus terminé avec succès.")
+    print("\n Processus terminé avec succès.")
 
 
 if __name__ == "__main__":

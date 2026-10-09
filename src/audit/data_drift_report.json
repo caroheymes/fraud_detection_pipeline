@@ -1,0 +1,167 @@
+{
+    "dataset_drift": false,
+    "metrics": {
+        "amt_drift_score": 0.010186597650727333,
+        "hour_sin_drift_score": 0.005891721164172934,
+        "hour_cos_drift_score": 0.008157202793194528,
+        "distance_achat_drift_score": 0.006595017378570499,
+        "is_fraud_drift_score": 0.01352538902646208,
+        "gender_drift_score": 4.776506380463789e-05
+    },
+    "full_audit": {
+        "current_date": "2020-12-07",
+        "reference_period": "2020-10-30 -> 2020-11-29",
+        "current_period": "2020-11-30 -> 2020-12-07",
+        "sample_size": 31902,
+        "reference_size": 67689,
+        "data_drift": {
+            "drift_detected": false,
+            "mean_drift_ratio": 0.0,
+            "threshold": 0.33,
+            "details": {
+                "amt": {
+                    "drift_detected": false,
+                    "metric_value": 0.010186597650727333,
+                    "threshold": 0.1,
+                    "method": "Wasserstein distance (normed)"
+                },
+                "hour_sin": {
+                    "drift_detected": false,
+                    "metric_value": 0.005891721164172934,
+                    "threshold": 0.1,
+                    "method": "Wasserstein distance (normed)"
+                },
+                "hour_cos": {
+                    "drift_detected": false,
+                    "metric_value": 0.008157202793194528,
+                    "threshold": 0.1,
+                    "method": "Wasserstein distance (normed)"
+                },
+                "distance_achat": {
+                    "drift_detected": false,
+                    "metric_value": 0.006595017378570499,
+                    "threshold": 0.1,
+                    "method": "Wasserstein distance (normed)"
+                },
+                "is_fraud": {
+                    "drift_detected": false,
+                    "metric_value": 0.01352538902646208,
+                    "threshold": 0.1,
+                    "method": "Jensen-Shannon distance"
+                },
+                "gender": {
+                    "drift_detected": false,
+                    "metric_value": 4.776506380463789e-05,
+                    "threshold": 0.1,
+                    "method": "Jensen-Shannon distance"
+                }
+            }
+        },
+        "score_drift": {
+            "score_drift_detected": false,
+            "psi_score": 0.03037692270553844,
+            "psi_threshold": 0.2,
+            "ref_alert_rate": 0.006382130035899481,
+            "cur_alert_rate": 0.003165945708732995,
+            "alert_rate_drift": true,
+            "buckets": [
+                {
+                    "bucket_range": "[0.0000 - 0.0037]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 12.56,
+                    "psi_contrib": 0.00585
+                },
+                {
+                    "bucket_range": "[0.0037 - 0.0038]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 9.97,
+                    "psi_contrib": 0.0
+                },
+                {
+                    "bucket_range": "[0.0038 - 0.0039]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 12.51,
+                    "psi_contrib": 0.00564
+                },
+                {
+                    "bucket_range": "[0.0039 - 0.0040]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 11.37,
+                    "psi_contrib": 0.00178
+                },
+                {
+                    "bucket_range": "[0.0040 - 0.0042]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 9.89,
+                    "psi_contrib": 1e-05
+                },
+                {
+                    "bucket_range": "[0.0042 - 0.0044]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 9.86,
+                    "psi_contrib": 2e-05
+                },
+                {
+                    "bucket_range": "[0.0044 - 0.0048]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 9.79,
+                    "psi_contrib": 4e-05
+                },
+                {
+                    "bucket_range": "[0.0048 - 0.0055]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 9.02,
+                    "psi_contrib": 0.001
+                },
+                {
+                    "bucket_range": "[0.0055 - 0.0080]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 8.25,
+                    "psi_contrib": 0.00335
+                },
+                {
+                    "bucket_range": "[0.0080 - 1.0000]",
+                    "expected_pct": 10.0,
+                    "actual_pct": 6.76,
+                    "psi_contrib": 0.01268
+                }
+            ]
+        },
+        "performance_audit": {
+            "model_version": "fraud_detector_v31",
+            "decision_threshold": 0.3415,
+            "sample_size": 31902,
+            "fraud_count": 74,
+            "observed_metrics": {
+                "f2_score": 0.8564231738035264,
+                "recall": 0.918918918918919,
+                "precision": 0.6732673267326733,
+                "f1_score": 0.7771428571428571,
+                "brier_score": 0.0007608184104709083,
+                "pr_auc": 0.9058421781709038
+            },
+            "reference_metrics_mlflow": {
+                "f2_score": 0.7246376811594203,
+                "recall": 0.7692307692307693,
+                "precision": 0.5882352941176471,
+                "f1_score": 0.6666666666666666,
+                "brier_score": 0.0014043783920537245
+            },
+            "relative_drops": {
+                "f2_drop_pct": -18.19,
+                "recall_drop_pct": -19.46,
+                "precision_drop_pct": -14.46,
+                "f1_drop_pct": -16.57
+            },
+            "confusion_matrix": {
+                "tn": 31795,
+                "fp": 33,
+                "fn": 6,
+                "tp": 68
+            },
+            "performance_degraded": false,
+            "degradation_reasons": []
+        },
+        "should_retrain": true
+    }
+}

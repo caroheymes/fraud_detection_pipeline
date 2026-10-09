@@ -27,6 +27,9 @@ class MLflowQualityGate:
         metric_target: str = "f2",
         experiment_name: str = "fraud_detection",
         tracking_uri: str | None = None,
+        min_precision: float = 0.50,
+        max_brier: float = 0.0050,
+        min_recall: float = 0.50,
     ):
         self.model_name = model_name
         self.metric_target = metric_target.lower()
@@ -34,6 +37,9 @@ class MLflowQualityGate:
         self.tracking_uri = tracking_uri or os.getenv(
             "MLFLOW_TRACKING_URI", "http://mlflow:5000"
         )
+        self.min_precision = min_precision
+        self.max_brier = max_brier
+        self.min_recall = min_recall
 
         mlflow.set_tracking_uri(self.tracking_uri)
         mlflow.set_experiment(self.experiment_name)
@@ -58,6 +64,8 @@ class MLflowQualityGate:
                 "recall",
                 "recall_score",
             ]
+        elif target in ["brier", "brier_score"]:
+            candidates = ["brier_score", "brier_score_loss", "brier", "Brier_Score"]
         elif target in ["precision", "prec"]:
             candidates = [
                 "prec_class_1",
@@ -115,22 +123,10 @@ class MLflowQualityGate:
                 try:
                     y_probas = model.predict_proba(X_test)[:, 1]
                 except Exception:
-                    feature_cols = [
-                        "category",
-                        "amt",
-                        "gender",
-                        "distance_achat",
-                        "age",
-                        "city_pop",
-                        "hour_sin",
-                        "hour_cos",
-                        "weekday_sin",
-                        "weekday_cos",
-                        "month_sin",
-                        "month_cos",
-                    ]
+                    from src.utils.features import BASE_FEATURE_COLUMNS
+
                     if isinstance(X_test, pd.DataFrame):
-                        avail = [c for c in feature_cols if c in X_test.columns]
+                        avail = [c for c in BASE_FEATURE_COLUMNS if c in X_test.columns]
                         y_probas = model.predict_proba(X_test[avail])[:, 1]
                     else:
                         raise
@@ -146,7 +142,7 @@ class MLflowQualityGate:
             return metrics, cm
         except Exception as e:
             print(
-                f"ℹ️ [QualityGate Side-by-Side] Impossible d'évaluer le modèle sur le test set : {e}"
+                f"[INFO] [QualityGate Side-by-Side] Impossible d'evaluer le modele sur le test set : {e}"
             )
             return None
 
@@ -162,13 +158,13 @@ class MLflowQualityGate:
         y_test: Any = None,
     ) -> tuple[bool, str]:
         """
-        Enregistre le run MLflow, publie le modèle dans le registre et applique le Quality Gate.
+        Enregistre le run MLflow, publie le modele dans le registre et applique le Quality Gate.
         Effectue une comparaison Side-by-Side si X_test et y_test sont fournis.
 
         Retourne :
-            (is_promoted: bool, target_version: str)
+            (should_promote: bool, target_version: str)
         """
-        # 0. Gestion explicite du Run MLflow actif ou création d'un Run nommé explicite
+        # 0. Gestion explicite du Run MLflow actif ou creation d'un Run nomme explicite
         from datetime import datetime
 
         active_run = mlflow.active_run()
@@ -186,7 +182,7 @@ class MLflowQualityGate:
             if tags and "model_type" in tags:
                 mlflow.set_tag("model_type", tags["model_type"])
 
-        # 1. Logging des paramètres, métriques et tags
+        # 1. Logging des parametres, metriques et tags
         if params is None:
             params = {}
         if decision_threshold is not None:
@@ -200,7 +196,20 @@ class MLflowQualityGate:
         if params:
             mlflow.log_params(params)
         mlflow.log_param("optimization_metric_target", self.metric_target.upper())
-        mlflow.log_metrics(metrics)
+
+        # Nettoyage et securisation des metriques (elimination des NaN/Inf pour PostgreSQL)
+        import numpy as np
+
+        clean_metrics = {}
+        for k, v in metrics.items():
+            try:
+                val = float(v)
+                if np.isnan(val) or np.isinf(val):
+                    val = 0.0
+                clean_metrics[k] = val
+            except (ValueError, TypeError):
+                pass
+        mlflow.log_metrics(clean_metrics)
 
         if tags:
             mlflow.set_tags(tags)
@@ -214,8 +223,8 @@ class MLflowQualityGate:
             if os.path.exists(temp_json):
                 os.remove(temp_json)
 
-        # 3. Sauvegarde du modèle dans le Model Registry
-        print(f"\n📦 Enregistrement du modèle dans MLflow ('{self.model_name}')...")
+        # 3. Sauvegarde du modele dans le Model Registry
+        print(f"\n[INFO] Enregistrement du modele dans MLflow ('{self.model_name}')...")
         mlflow.sklearn.log_model(
             model,
             artifact_path="model",
@@ -223,11 +232,11 @@ class MLflowQualityGate:
             registered_model_name=self.model_name,
         )
 
-        # 4. Identification de la nouvelle version créée
+        # 4. Identification de la nouvelle version creee
         versions = self.client.search_model_versions(f"name='{self.model_name}'")
         target_version = str(max(versions, key=lambda v: int(v.version)).version)
 
-        # 5. Contrôle Qualité MLOps (Challenger vs Champion - Side-by-Side ou Historique)
+        # 5. Controle Qualite MLOps (Challenger vs Champion - Side-by-Side ou Historique)
         target_key = self.get_target_metric_key(metrics)
         candidate_score = metrics.get(target_key, 0.0)
 
@@ -237,7 +246,7 @@ class MLflowQualityGate:
 
         if champion_info:
             champion_hist_score = champion_info["metrics"].get(target_key, 0.0)
-            # Évaluation comparative Side-by-Side si le jeu de test est fourni
+            # Evaluation comparative Side-by-Side si le jeu de test est fourni
             if X_test is not None and y_test is not None:
                 try:
                     loaded_champ, _, champ_thresh = load_champion_model(
@@ -260,57 +269,113 @@ class MLflowQualityGate:
                             )
                 except Exception as eval_err:
                     print(
-                        f"ℹ️ [Quality Gate] Évaluation Side-by-Side indisponible ({eval_err}), repli sur le score historique."
+                        f"[INFO] [Quality Gate] Evaluation Side-by-Side indisponible ({eval_err}), repli sur le score historique."
                     )
 
+        is_minimize = self.metric_target.lower() in [
+            "brier",
+            "brier_score",
+            "loss",
+            "log_loss",
+            "mse",
+            "mae",
+        ]
+
         if champion_side_by_side_score is not None:
-            comparison_mode = "Side-by-Side (Même jeu de test récent)"
+            comparison_mode = "Side-by-Side (Meme jeu de test recent)"
             reference_score = champion_side_by_side_score
         elif champion_info:
             comparison_mode = "Score Historique MLflow (Fallback)"
             reference_score = champion_hist_score
         else:
-            comparison_mode = "Premier Déploiement"
-            reference_score = 0.0
+            comparison_mode = "Premier Deploiement"
+            reference_score = float("inf") if is_minimize else 0.0
 
         print("\n" + "=" * 75)
-        print("🛡️ CONTRÔLE QUALITÉ MLOPS — ÉVALUATION COMPARATIVE ET RÈGLE DE PROMOTION")
-        print(f"  • Mode de comparaison   : {comparison_mode}")
+        print("[QUALITY GATE MLOPS] EVALUATION COMPARATIVE ET REGLE DE PROMOTION")
+        print(f"  - Mode de comparaison   : {comparison_mode}")
         print(
-            f"  • Métrique cible         : {self.metric_target.upper()} ({target_key})"
+            f"  - Metrique cible        : {self.metric_target.upper()} ({target_key})"
         )
         if champion_info:
             if champion_side_by_side_score is not None:
                 print(
-                    f"  • Champion Actuel (V{champion_info['version']}) sur ce Test Set : {self.metric_target.upper()} = {champion_side_by_side_score:.4f} (Score Hist: {champion_hist_score:.4f})"
+                    f"  - Champion Actuel (V{champion_info['version']}) sur ce Test Set : {self.metric_target.upper()} = {champion_side_by_side_score:.4f} (Score Hist: {champion_hist_score:.4f})"
                 )
             else:
                 print(
-                    f"  • Champion Actuel (V{champion_info['version']}) Score Historique  : {self.metric_target.upper()} = {champion_hist_score:.4f}"
+                    f"  - Champion Actuel (V{champion_info['version']}) Score Historique  : {self.metric_target.upper()} = {champion_hist_score:.4f}"
                 )
         else:
-            print("  • Champion Actuel        : Aucun champion actif enregistré")
+            print("  - Champion Actuel        : Aucun champion actif enregistre")
         print(
-            f"  • Nouveau Candidat (V{target_version}) sur ce Test Set   : {self.metric_target.upper()} = {candidate_score:.4f}"
+            f"  - Nouveau Candidat (V{target_version}) sur ce Test Set   : {self.metric_target.upper()} = {candidate_score:.4f}"
         )
         print("=" * 75)
 
-        should_promote = (champion_info is None) or (candidate_score > reference_score)
+        # 5.1 Verification des garde-fous bancaires d'admissibilite (Hard Constraints)
+        cand_prec = float(
+            metrics.get("prec_class_1", metrics.get("precision_class_1", 1.0))
+        )
+        cand_rec = float(metrics.get("rec_class_1", metrics.get("recall_class_1", 1.0)))
+        cand_brier = float(
+            metrics.get("brier_score", metrics.get("brier_score_loss", 0.0))
+        )
+
+        guardrail_failures = []
+        if self.min_precision > 0.0 and cand_prec < self.min_precision:
+            guardrail_failures.append(
+                f"Precision insuffisante ({cand_prec:.2%} < {self.min_precision:.2%})"
+            )
+        if self.min_recall > 0.0 and cand_rec < self.min_recall:
+            guardrail_failures.append(
+                f"Rappel insuffisant ({cand_rec:.2%} < {self.min_recall:.2%})"
+            )
+        if self.max_brier > 0.0 and cand_brier > self.max_brier:
+            guardrail_failures.append(
+                f"Brier Score trop eleve / calibration divergente ({cand_brier:.4f} > {self.max_brier:.4f})"
+            )
+
+        if is_minimize:
+            score_improves = (champion_info is None) or (
+                candidate_score < reference_score
+            )
+            comp_sym = "<"
+            comp_sym_inv = ">="
+        else:
+            score_improves = (champion_info is None) or (
+                candidate_score > reference_score
+            )
+            comp_sym = ">"
+            comp_sym_inv = "<="
+
+        # Promotion si et seulement si l'objectif principal s'ameliore ET tous les garde-fous sont valides
+        should_promote = score_improves and (len(guardrail_failures) == 0)
 
         if should_promote:
             self.client.set_registered_model_alias(
                 name=self.model_name, alias="champion", version=target_version
             )
             print(
-                f"\n🟢 PROMOTION RÉUSSIE : Version {target_version} ({candidate_score:.4f} > {reference_score:.4f}) promue avec l'alias '@champion' !"
+                f"\n[PROMOTION REUSSIE] Version {target_version} ({candidate_score:.4f} {comp_sym} {reference_score:.4f}) promue avec l'alias '@champion' !"
+            )
+            print(
+                f"   [GARDE-FOUS] Respectes : Precision={cand_prec:.2%}, Rappel={cand_rec:.2%}, Brier={cand_brier:.4f}."
             )
         else:
-            print(
-                f"\n⛔ MODÈLE NON PROMU : Score candidat ({candidate_score:.4f}) <= Score de référence ({reference_score:.4f})."
-            )
+            if not score_improves:
+                print(
+                    f"\n[MODELE NON PROMU] Score candidat ({candidate_score:.4f}) {comp_sym_inv} Score de reference ({reference_score:.4f})."
+                )
+            else:
+                print(
+                    f"\n[MODELE NON PROMU] Le score cible s'ameliore ({candidate_score:.4f} {comp_sym} {reference_score:.4f}) mais des garde-fous bancaires sont enfreints :"
+                )
+                for f_msg in guardrail_failures:
+                    print(f"   [ALERTE] {f_msg}")
             if champion_info:
                 print(
-                    f"   👉 L'alias '@champion' est maintenu sur la Version {champion_info['version']}."
+                    f"   [INFO] L'alias '@champion' est maintenu sur la Version {champion_info['version']}."
                 )
 
         if created_local_run:
@@ -319,41 +384,43 @@ class MLflowQualityGate:
         return should_promote, target_version
 
     def list_registered_versions(self) -> list[Any]:
-        """Retourne la liste des versions enregistrées pour ce modèle."""
+        """Retourne la liste des versions enregistrees pour ce modele."""
         try:
             return self.client.search_model_versions(f"name='{self.model_name}'")
         except Exception as e:
             print(
-                f"❌ Erreur lors de la recherche des versions du modèle '{self.model_name}' : {e}"
+                f"[ERREUR] Erreur lors de la recherche des versions du modele '{self.model_name}' : {e}"
             )
             return []
 
     def set_champion_alias(self, version: str) -> bool:
-        """Attribue manuellement l'alias @champion à une version spécifique (Rollback / Promotion manuelle)."""
+        """Attribue manuellement l'alias @champion a une version specifique (Rollback / Promotion manuelle)."""
         try:
             self.client.set_registered_model_alias(
                 self.model_name, "champion", str(version)
             )
             print(
-                f"✅ Alias '@champion' réassigné avec succès à la Version {version} du modèle '{self.model_name}' !"
+                f"[SUCCES] Alias '@champion' reassigne avec succes a la Version {version} du modele '{self.model_name}' !"
             )
             return True
         except Exception as e:
             print(
-                f"❌ Impossible d'assigner l'alias @champion à la version {version} : {e}"
+                f"[ERREUR] Impossible d'assigner l'alias @champion a la version {version} : {e}"
             )
             return False
 
     def print_status_table(self):
-        """Affiche un tableau clair de toutes les versions enregistrées et du champion actuel."""
-        print(f"🔗 Connexion à MLflow : {self.tracking_uri}")
+        """Affiche un tableau clair de toutes les versions enregistrees et du champion actuel."""
+        print(f"[INFO] Connexion a MLflow : {self.tracking_uri}")
         versions = self.list_registered_versions()
         if not versions:
-            print(f"⚠️ Aucune version trouvée pour le modèle '{self.model_name}'.")
+            print(
+                f"[ALERTE] Aucune version trouvee pour le modele '{self.model_name}'."
+            )
             return
 
         print(
-            f"\n📦 Versions enregistrées pour '{self.model_name}' ({len(versions)} trouvées) :"
+            f"\n Versions enregistrées pour '{self.model_name}' ({len(versions)} trouvées) :"
         )
         print("-" * 80)
         print(f"{'Version':<10} | {'Statut':<12} | {'Aliases':<15} | {'Run ID':<35}")
@@ -368,7 +435,7 @@ class MLflowQualityGate:
         champ_info = self.get_active_champion_info()
         if champ_info:
             print(
-                f"\n👑 Modèle Champion Actuel : Version {champ_info['version']} (Run ID: {champ_info['run_id']})"
+                f"\n Modèle Champion Actuel : Version {champ_info['version']} (Run ID: {champ_info['run_id']})"
             )
             metrics = champ_info.get("metrics", {})
             print(
@@ -385,7 +452,7 @@ class MLflowQualityGate:
             )
         else:
             print(
-                f"\n⚠️ Aucun modèle n'a actuellement l'alias '@champion' pour '{self.model_name}'."
+                f"\n Aucun modèle n'a actuellement l'alias '@champion' pour '{self.model_name}'."
             )
 
     def load_champion(
@@ -438,6 +505,10 @@ def load_champion_model(
             "src.training.autoencoder_xgb",
             ["AutoencoderXGBoostPipeline", "AutoencoderFeatureLearner"],
         ),
+        (
+            "src.training.optimize_xgb_iforest",
+            ["IsolationForestXGBoostPipeline"],
+        ),
     ]:
         try:
             mod = __import__(mod_name, fromlist=class_names)
@@ -469,12 +540,12 @@ def load_champion_model(
             model_version_id = f"{model_name}@{alias}"
 
         print(
-            f"[MLOps Champion] 🚀 Modèle Champion '{model_uri}' chargé avec succès en mémoire : '{model_version_id}' (Seuil calibré: {decision_threshold:.4f})."
+            f"[MLOps Champion]  Modèle Champion '{model_uri}' chargé avec succès en mémoire : '{model_version_id}' (Seuil calibré: {decision_threshold:.4f})."
         )
         return loaded, model_version_id, decision_threshold
     except Exception as e:
         print(
-            f"[MLOps Champion] ⚠️ Échec chargement champion MLflow ('{model_name}@{alias}') : {e}"
+            f"[MLOps Champion]  Échec chargement champion MLflow ('{model_name}@{alias}') : {e}"
         )
         if fallback_uri:
             try:
@@ -515,7 +586,7 @@ def main():
     gate = MLflowQualityGate(model_name=args.model_name)
     if args.set_version:
         print(
-            f"\n⚙️ Réassignation de l'alias '@champion' vers la Version {args.set_version}..."
+            f"\n Réassignation de l'alias '@champion' vers la Version {args.set_version}..."
         )
         gate.set_champion_alias(args.set_version)
     gate.print_status_table()

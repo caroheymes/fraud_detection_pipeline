@@ -1,0 +1,59 @@
+===========================================================================
+🧪 BENCHMARK SCIENTIFIQUE : IMPACT DU STACKING ISOLATION FOREST
+===========================================================================
+📁 PostgreSQL connecté : 102,537 transactions récentes (Date max: 2020-09-12 11:05:30).
+ℹ️ Volume demandé (300,000 lignes) supérieur au périmètre PostgreSQL (230,528). Extension automatique sur l'historique complet fraudTest.csv (555,719 lignes disponibles).
+📅 Échantillonnage chronologique : 300,000 PREMIÈRES transactions (les plus anciennes)...
+✅ Données prêtes : (300000, 41) [du 2020-06-21 au 2020-10-12] (dont 1,379 fraudes, 0.460%)
+📅 Jeu d'Entraînement : 89,963 transactions (du 2020-06-21 au 2020-07-21)
+   • Fraudes Train : 370 (0.411%)
+📅 Jeu de Test Out-of-Time : 144,574 transactions (du 2020-07-22 au 2020-09-13)
+   • Fraudes Test : 655 (0.453%)
+---------------------------------------------------------------------------
+⚙️ Vectorisation des features tabulaires avec TableVectorizer...
+⚖️ Scale Pos Weight calculé : 242.14
+
+🌲 Entraînement Modèle 1 : XGBoost Baseline...
+🌲🔮 Entraînement Modèle 2 : XGBoost + Stacking Isolation Forest...
+
+================================================================================
+📊 RÉSULTATS COMPARATIFS SUR LE JEU DE TEST (22 Juillet -> 13 Septembre)
+================================================================================
+
+📌 CONFIGURATION A : Optimisation orientée F1-SCORE :
+Métrique                 | 1. Baseline (XGBoost)  | 2. XGB + IsolationForest | Gain / Diff 
+------------------------------------------------------------------------------------------
+AUPRC / PR-AUC           | 0.6069                 | 0.6100                   | +0.0031   
+ROC-AUC                  | 0.9854                 | 0.9853                   | -0.0002   
+Seuil Calibré            | 0.8044                 | 0.8089                   | +0.0045   
+Précision Fraude (C1)    | 0.7354                 | 0.7305                   | -0.0048   
+Rappel Fraude (C1)       | 0.5176                 | 0.5298                   | +0.0122    🚀
+F1-Score Fraude (C1)     | 0.6075                 | 0.6142                   | +0.0066    🚀
+F2-Score Fraude (C1)     | 0.5501                 | 0.5606                   | +0.0104    🚀
+F1-Global (Macro)        | 0.8030                 | 0.8063                   | +0.0033   
+
+  • Matrice Confusion Baseline  : TP=339, FP=122, FN=316, TN=143797
+  • Matrice Confusion + IFOREST : TP=347, FP=128, FN=308, TN=143791
+
+📌 CONFIGURATION B : Optimisation orientée F2-SCORE (Priorité Rappel) :
+Métrique                 | 1. Baseline (XGBoost)  | 2. XGB + IsolationForest | Gain / Diff 
+------------------------------------------------------------------------------------------
+AUPRC / PR-AUC           | 0.6069                 | 0.6100                   | +0.0031   
+ROC-AUC                  | 0.9854                 | 0.9853                   | -0.0002   
+Seuil Calibré            | 0.5663                 | 0.5425                   | -0.0238   
+Précision Fraude (C1)    | 0.4146                 | 0.3756                   | -0.0390   
+Rappel Fraude (C1)       | 0.6931                 | 0.7191                   | +0.0260    🚀
+F1-Score Fraude (C1)     | 0.5189                 | 0.4935                   | -0.0254   
+F2-Score Fraude (C1)     | 0.6110                 | 0.6079                   | -0.0031   
+F1-Global (Macro)        | 0.7580                 | 0.7450                   | -0.0129   
+
+  • Matrice Confusion Baseline  : TP=454, FP=641, FN=201, TN=143278
+  • Matrice Confusion + IFOREST : TP=471, FP=783, FN=184, TN=143136
+
+================================================================================
+💡 CONCLUSION DE L'EXPÉRIMENTATION
+================================================================================
+  • Évolution PR-AUC (Qualité intrinsèque) : +0.31 points de %
+  • Évolution F1-Score Fraude               : +0.66 points de %
+================================================================================
+

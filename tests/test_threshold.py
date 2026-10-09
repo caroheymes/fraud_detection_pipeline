@@ -40,7 +40,7 @@ def test_find_optimal_threshold_auprc():
 
 
 def test_evaluate_predictions_and_curves():
-    """Vérifie le calcul unifié des courbes PR-AUC, ROC-AUC et métriques de confusion."""
+    """Vérifie le calcul unifié des courbes PR-AUC, ROC-AUC, Brier Score et métriques de confusion."""
     y_true = np.array([0, 0, 0, 1, 1, 1, 0, 1])
     y_probas = np.array([0.1, 0.2, 0.3, 0.7, 0.8, 0.85, 0.4, 0.9])
 
@@ -51,12 +51,24 @@ def test_evaluate_predictions_and_curves():
     assert "roc_auc" in metrics
     assert "f1_class_1" in metrics
     assert "f2_class_1" in metrics
+    assert "brier_score" in metrics
     assert "decision_threshold" in metrics
     assert metrics["decision_threshold"] == 0.50
     assert metrics["auprc"] > 0.70
     assert metrics["roc_auc"] > 0.70
+    assert 0.0 <= metrics["brier_score"] <= 0.20
 
     assert cm["tp"] == 4
     assert cm["tn"] == 4
     assert cm["fp"] == 0
     assert cm["fn"] == 0
+
+
+def test_find_optimal_threshold_brier():
+    """Vérifie le fonctionnement pour la métrique Brier Score."""
+    y_true = np.array([0, 0, 0, 1, 1, 1, 0, 1])
+    y_probas = np.array([0.1, 0.2, 0.3, 0.7, 0.8, 0.85, 0.4, 0.9])
+
+    thresh, score = find_optimal_threshold(y_true, y_probas, metric_target="brier")
+    assert 0.05 <= thresh <= 0.95
+    assert 0.0 <= score <= 0.20

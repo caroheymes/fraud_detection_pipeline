@@ -2,15 +2,21 @@
 # docker exec -t fraud-detection-ray-head python src/training/optimize_xgb.py --n-trials 50 --sample-size -1
 
 import argparse
+import gc
 import os
 import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(line_buffering=True)
+
 from datetime import datetime
 
 import mlflow
 import mlflow.sklearn
 import numpy as np
 import optuna
-import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from skrub import TableVectorizer
@@ -23,29 +29,9 @@ if project_root not in sys.path:
 
 from src.utils.api_reloader import reload_serving_api
 from src.utils.data_loader import load_dataset
+from src.utils.features import BASE_FEATURE_COLUMNS, get_moderate_sampled_data
 from src.utils.mlflow_manager import MLflowQualityGate
 from src.utils.threshold import evaluate_predictions_and_curves, find_optimal_threshold
-
-
-# --- 1. MODERATE SAMPLING ---
-def get_moderate_sampled_data(X_train_df, y_train_series, target_ratio=0.05):
-    if target_ratio <= 0.0 or target_ratio >= 1.0:
-        return X_train_df, y_train_series
-
-    train_df = pd.concat([X_train_df, y_train_series], axis=1)
-    fraud = train_df[train_df["is_fraud"] == 1]
-    normal = train_df[train_df["is_fraud"] == 0]
-
-    n_fraud = len(fraud)
-    n_normal_required = int(n_fraud * (1.0 / target_ratio - 1.0))
-
-    if n_normal_required < len(normal):
-        normal_sampled = normal.sample(n=n_normal_required, random_state=42)
-    else:
-        normal_sampled = normal
-
-    sampled_df = pd.concat([fraud, normal_sampled]).sample(frac=1.0, random_state=42)
-    return sampled_df.drop(columns=["is_fraud"]), sampled_df["is_fraud"]
 
 
 def main():
@@ -71,8 +57,15 @@ def main():
         "--metric-target",
         type=str,
         default="f2",
-        choices=["f2", "f1", "auprc", "pr_auc", "recall", "cost_sensitive"],
+        choices=["f2", "f1", "auprc", "pr_auc", "recall", "brier", "cost_sensitive"],
         help="Métrique cible pour le Threshold Tuning et le Quality Gate (défaut: f2)",
+    )
+    parser.add_argument(
+        "--sample-position",
+        type=str,
+        default="last",
+        choices=["last", "first", "random"],
+        help="Mode d'échantillonnage : 'last' (défaut), 'first' ou 'random'",
     )
     args = parser.parse_args()
 
@@ -83,24 +76,12 @@ def main():
     # Chargement et préparation des données via le chargeur universel
     df = load_dataset(
         sample_size=args.sample_size,
+        sample_position=args.sample_position,
         include_graph_ids=False,
     )
 
-    # Variables utilisées pour l'optimisation (Jeu 6 : Distance + CityPop)
-    features = [
-        "category",
-        "amt",
-        "gender",
-        "distance_achat",
-        "age",
-        "city_pop",
-        "hour_sin",
-        "hour_cos",
-        "weekday_sin",
-        "weekday_cos",
-        "month_sin",
-        "month_cos",
-    ]
+    # Variables utilisées pour l'optimisation (socle standardisé unifié)
+    features = [c for c in BASE_FEATURE_COLUMNS if c in df.columns]
 
     X = df[features]
     y = df["is_fraud"]
@@ -119,8 +100,12 @@ def main():
         f"Métrique cible d'optimisation : {args.metric_target.upper()} avec Threshold Tuning."
     )
 
+    is_minimize = args.metric_target.lower() in ["brier", "brier_score"]
+    best_score_so_far = float("inf") if is_minimize else -1.0
+
     # Définition de la fonction objectif d'Optuna
     def objective(trial):
+        nonlocal best_score_so_far
         # Espace de recherche hyperparamètres recalibré sur la zone optimale
         params = {
             # 1. Profondeur augmentée & Apprentissage fin
@@ -147,7 +132,7 @@ def main():
 
         trial_start = datetime.now()
         print(
-            f"⏳ [ESSAI {trial.number + 1}/{args.n_trials}] "
+            f" [ESSAI {trial.number + 1}/{args.n_trials}] "
             f"n_est={params['n_estimators']}, depth={params['max_depth']}, lr={params['learning_rate']:.3f}, scale_pos={params['scale_pos_weight']:.1f}, gamma={params['gamma']:.2f}...",
             end="",
             flush=True,
@@ -185,15 +170,34 @@ def main():
 
             # Inférence probabiliste et calibration du seuil sur le pli de validation
             y_val_probas = clf.predict_proba(X_val_encoded)[:, 1]
-            _, score = find_optimal_threshold(
-                y_val, y_val_probas, metric_target=args.metric_target
-            )
+            if is_minimize:
+                val_metrics, _ = evaluate_predictions_and_curves(y_val, y_val_probas)
+                score = val_metrics["brier_score"]
+            else:
+                _, score = find_optimal_threshold(
+                    y_val, y_val_probas, metric_target=args.metric_target
+                )
             scores.append(score)
+
+            del clf, vectorizer, X_tr_encoded, X_val_encoded, y_val_probas
+            gc.collect()
 
         mean_score = float(np.mean(scores)) if scores else 0.0
         elapsed = (datetime.now() - trial_start).total_seconds()
+
+        is_new_best = ""
+        is_improved = (
+            (mean_score < best_score_so_far)
+            if is_minimize
+            else (mean_score > best_score_so_far)
+        )
+        if is_improved:
+            best_score_so_far = mean_score
+            is_new_best = "  [NOUVEAU MEILLEUR SCORE]"
+
         print(
-            f" -> Score {args.metric_target.upper()} = {mean_score:.4f} ({elapsed:.1f}s)"
+            f" -> Score {args.metric_target.upper()} = {mean_score:.4f} ({elapsed:.1f}s){is_new_best}",
+            flush=True,
         )
         return mean_score
 
@@ -220,7 +224,7 @@ def main():
                 mlflow.set_tag("trial_status", str(trial.state))
 
         # Création et lancement de l'étude Optuna
-        study = optuna.create_study(direction="maximize")
+        study = optuna.create_study(direction="minimize" if is_minimize else "maximize")
         study.optimize(
             objective, n_trials=args.n_trials, callbacks=[mlflow_trial_callback]
         )
@@ -265,14 +269,14 @@ def main():
             y_test_final, y_test_probas, metric_target=args.metric_target
         )
         print(
-            f"\n🎯 Seuil de décision optimal calibré sur {args.metric_target.upper()} : {best_thresh:.4f} (Score: {best_score:.4f})"
+            f"\n Seuil de décision optimal calibré sur {args.metric_target.upper()} : {best_thresh:.4f} (Score: {best_score:.4f})"
         )
 
         metrics, confusion_dict = evaluate_predictions_and_curves(
             y_test_final, y_test_probas, threshold=best_thresh
         )
 
-        print("\n📊 Métriques finales (avec AUPRC & seuil calibré) :")
+        print("\n Métriques finales (avec AUPRC & seuil calibré) :")
         for k, v in metrics.items():
             print(f"  • {k:22s} : {v:.4f}")
 

@@ -32,20 +32,20 @@ def reload_serving_api(custom_url: str | None = None, timeout: int = 5) -> bool:
         if u not in candidate_urls:
             candidate_urls.append(u)
 
-    print("\n🔄 Déclenchement du rechargement à chaud de l'API d'inférence...")
+    print("\n Déclenchement du rechargement à chaud de l'API d'inférence...")
     for url in candidate_urls:
         try:
             resp = requests.post(url, timeout=timeout)
             if resp.status_code == 200:
-                print(f"✅ Rechargement à chaud réussi sur {url} : {resp.json()}")
+                print(f" Rechargement à chaud réussi sur {url} : {resp.json()}")
                 return True
             else:
-                print(f"⚠️ Réponse HTTP {resp.status_code} sur {url} : {resp.text}")
+                print(f" Réponse HTTP {resp.status_code} sur {url} : {resp.text}")
         except requests.RequestException:
             pass
 
     print(
-        "ℹ️ L'API d'inférence n'a pas répondu ou n'est pas active sur les ports configurés."
+        " L'API d'inférence n'a pas répondu ou n'est pas active sur les ports configurés."
     )
     return False
 

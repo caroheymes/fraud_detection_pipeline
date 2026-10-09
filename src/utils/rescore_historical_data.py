@@ -60,7 +60,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 70)
-    print("  🚀 RÉ-INFÉRENCE HISTORIQUE MLOPS (In-Place Batch Rescoring)")
+    print("   RÉ-INFÉRENCE HISTORIQUE MLOPS (In-Place Batch Rescoring)")
     print(f"  Date de départ : {args.start_date}")
     print(f"  Seuil de décision : {args.threshold}")
     print(f"  Taille des lots : {args.batch_size}")
@@ -79,12 +79,12 @@ def main():
         champion_run_id = version_details.run_id
         champion_tag = f"fraud_detector_v{champion_version_num}"
         print(
-            f"\n📦 Modèle Champion détecté : '{champion_tag}' (Run ID: {champion_run_id})"
+            f"\n Modèle Champion détecté : '{champion_tag}' (Run ID: {champion_run_id})"
         )
         model = mlflow.sklearn.load_model(f"runs:/{champion_run_id}/model")
     except Exception as e:
         print(
-            f"⚠️ Erreur alias champion : {e}. Recherche du dernier modèle de 'fraud_detection'..."
+            f" Erreur alias champion : {e}. Recherche du dernier modèle de 'fraud_detection'..."
         )
         exp = client.get_experiment_by_name("fraud_detection")
         runs = client.search_runs(
@@ -94,7 +94,7 @@ def main():
         champion_tag = "fraud_detector_v12"
         model = mlflow.sklearn.load_model(f"runs:/{champion_run_id}/model")
 
-    print(f"✅ Modèle chargé avec succès : {type(model).__name__}")
+    print(f" Modèle chargé avec succès : {type(model).__name__}")
 
     # 2. Récupération des transactions cibles depuis PostgreSQL
     engine = get_postgres_engine()
@@ -106,9 +106,7 @@ def main():
         cur.execute(query_count, (args.start_date,))
         total_rows = cur.fetchone()[0]
 
-    print(
-        f"\n📊 Transactions à ré-inférer depuis le {args.start_date} : {total_rows:,}"
-    )
+    print(f"\n Transactions à ré-inférer depuis le {args.start_date} : {total_rows:,}")
     if total_rows == 0:
         print("Aucune transaction trouvée pour cette période.")
         conn.close()
@@ -241,11 +239,11 @@ def main():
 
     conn.close()
     elapsed_total = time.time() - t_start
-    print(f"\n🎉 Ré-inférence terminée en {elapsed_total:.2f}s !")
+    print(f"\n Ré-inférence terminée en {elapsed_total:.2f}s !")
     print(f"Total fraudes détectées sur le segment : {total_fraud_detected:,}")
 
     # 4. Actualisation des Data Marts Gold via dbt run
-    print("\n🔄 Exécution de 'dbt run' pour actualiser les tables Gold...")
+    print("\n Exécution de 'dbt run' pour actualiser les tables Gold...")
     env = os.environ.copy()
     env["POSTGRES_HOST"] = os.getenv("POSTGRES_HOST", "postgres")
     env["POSTGRES_PORT"] = os.getenv("POSTGRES_PORT", "5432")
@@ -266,13 +264,11 @@ def main():
         )
         print(res.stdout)
         if res.returncode == 0:
-            print(
-                "✅ Toutes les tables Gold (SLA, marchands, Pareto) sont 100% à jour !"
-            )
+            print(" Toutes les tables Gold (SLA, marchands, Pareto) sont 100% à jour !")
         else:
-            print(f"⚠️ Avertissement dbt : {res.stderr}")
+            print(f" Avertissement dbt : {res.stderr}")
     except Exception as dbt_err:
-        print(f"⚠️ dbt non trouvé en local ou erreur d'exécution : {dbt_err}")
+        print(f" dbt non trouvé en local ou erreur d'exécution : {dbt_err}")
 
 
 if __name__ == "__main__":

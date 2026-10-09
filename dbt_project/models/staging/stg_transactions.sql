@@ -5,7 +5,9 @@ renamed as (
     select
         trans_num as transaction_id,
         trans_date_trans_time as transaction_timestamp,
-        cc_num as credit_card_number,
+        -- Pseudonymisation irréversible RGPD (SHA-256) et masquage PCI-DSS
+        encode(sha256(cast(cc_num as text)::bytea), 'hex') as credit_card_hash,
+        '****-****-****-' || right(cast(cc_num as text), 4) as credit_card_masked,
         merchant as merchant_name,
         category as transaction_category,
         amt as transaction_amount,
@@ -21,6 +23,7 @@ renamed as (
                 power(sin(radians(merch_long - long) / 2.0), 2)
             )
         ))::numeric(10, 2) as distance_achat,
+        is_fraud::int as is_actual_fraud,
         prediction as is_predicted_fraud,
         prediction_proba as prediction_probability,
         model_version,

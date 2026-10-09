@@ -97,14 +97,14 @@ def main():
                         t = t.tz_localize(None)
                     start_date = t
                     print(
-                        f"[Simulation MLOps] ✅ Date MAX détectée dans PostgreSQL : {start_date}"
+                        f"[Simulation MLOps]  Date MAX détectée dans PostgreSQL : {start_date}"
                     )
         except Exception as e:
             print(f"[Simulation MLOps] Connexion PostgreSQL non disponible ({e}).")
 
     if start_date is None:
         start_date = df["trans_date_trans_time"].min() + timedelta(days=30)
-        print(f"[Simulation MLOps] ⚠️ Repli sur la date par défaut : {start_date}")
+        print(f"[Simulation MLOps]  Repli sur la date par défaut : {start_date}")
 
     # 3.5 Vérifier si des fichiers sont déjà en attente dans la queue (pour accumuler sans écraser)
     max_queue_date = None
@@ -128,7 +128,7 @@ def main():
     if max_queue_date is not None:
         if max_queue_date > start_date:
             print(
-                f"[Simulation MLOps] 📁 Fichiers en attente dans la queue : décalage du début au {max_queue_date} pour accumuler."
+                f"[Simulation MLOps]  Fichiers en attente dans la queue : décalage du début au {max_queue_date} pour accumuler."
             )
             start_date = max_queue_date
 

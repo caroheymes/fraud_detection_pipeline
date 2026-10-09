@@ -10,20 +10,20 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
+from src.dashboard.theme import apply_theme
 from src.utils.db import get_postgres_engine
 
-st.set_page_config(
-    page_title="Webhooks Marchands (Live)", page_icon="🔔", layout="wide"
-)
+st.set_page_config(page_title="Webhooks Marchands (Live)", layout="wide")
+apply_theme()
 
-st.title("🔔 Webhooks marchands en direct")
+st.title("Webhooks marchands en direct")
 st.write(
     "Historique en temps réel des alertes de fraudes envoyées aux serveurs des marchands partenaires (toutes les alertes des 24 dernières heures glissantes sont conservées dans Redis)."
 )
 st.markdown("---")
 
 # --- Section de simulation & cURL ---
-with st.expander("🛠️ Espace de test & Intégration API Marchand (cURL)"):
+with st.expander("Espace de test & Intégration API Marchand (cURL)"):
     st.write(
         "Les marchands partenaires reçoivent des notifications webhooks en temps réel lors de suspicions de fraude. Vous pouvez simuler manuellement l'arrivée d'une alerte en appelant l'endpoint de réception :"
     )
@@ -50,7 +50,7 @@ with st.expander("🛠️ Espace de test & Intégration API Marchand (cURL)"):
     )
 
     st.write(
-        "💡 **Fonctionnement interne** : Lorsque vous envoyez cette commande, le serveur API interroge sa base de données pour charger toutes les caractéristiques réelles de la transaction, chiffre le numéro de carte bancaire par SHA-256 et renvoie la notification webhook enrichie complète en réponse (que vous verrez s'afficher ci-dessous après rafraîchissement)."
+        " **Fonctionnement interne** : Lorsque vous envoyez cette commande, le serveur API interroge sa base de données pour charger toutes les caractéristiques réelles de la transaction, chiffre le numéro de carte bancaire par SHA-256 et renvoie la notification webhook enrichie complète en réponse (que vous verrez s'afficher ci-dessous après rafraîchissement)."
     )
 
 st.markdown("---")
@@ -95,9 +95,9 @@ try:
                     "Marchand": data.get("merchant", "N/A"),
                     "Montant (€)": data.get("amount", 0.0),
                     "Catégorie": data.get("category", "N/A"),
-                    "Prédiction Modèle": "🚨 Suspect"
+                    "Prédiction Modèle": "Suspect"
                     if int(data.get("prediction", 0)) == 1
-                    else "✅ Sain",
+                    else "Sain",
                     "Probabilité Fraude": f"{float(data.get('prediction_proba', 0.0)):.4%}",
                 }
             )
@@ -110,16 +110,16 @@ except Exception as redis_err:
 db_query = """
     SELECT 
         trans_date_trans_time::text as "Date & Heure",
-        'transaction.suspecte' as "Événement",
+        'transaction.suspecte'as "Événement",
         trans_num as "ID Transaction",
         merchant as "Marchand",
         amt as "Montant (€)",
         category as "Catégorie",
-        '🚨 Suspect' as "Prédiction Modèle",
-        ROUND((prediction_proba * 100.0)::numeric, 4)::text || '%' as "Probabilité Fraude"
+        'Suspect'as "Prédiction Modèle",
+        ROUND((prediction_proba * 100.0)::numeric, 4)::text || '%'as "Probabilité Fraude"
     FROM silver.rawdata
     WHERE prediction = 1
-      AND trans_date_trans_time >= (SELECT COALESCE(MAX(trans_date_trans_time), NOW()) - INTERVAL '24 hours' FROM silver.rawdata)
+      AND trans_date_trans_time >= (SELECT COALESCE(MAX(trans_date_trans_time), NOW()) - INTERVAL '24 hours'FROM silver.rawdata)
     ORDER BY trans_date_trans_time DESC
 """
 db_df, db_err = query_db(db_query)
@@ -149,7 +149,7 @@ if alerts_list:
     df_alerts = pd.DataFrame(alerts_list)
 
     # Filtre par marchand via un menu déroulant
-    st.subheader("🔍 Filtrer les alertes par marchand")
+    st.subheader("Filtrer les alertes par marchand")
     merchant_options = ["Tous"] + sorted(list(df_alerts["Marchand"].unique()))
     selected_merchant = st.selectbox("Sélectionnez le marchand :", merchant_options)
 
@@ -158,13 +158,13 @@ if alerts_list:
     else:
         df_filtered = df_alerts
 
-    st.subheader("📋 Tableau de suivi des webhooks marchands")
+    st.subheader("Tableau de suivi des webhooks marchands")
     st.dataframe(df_filtered, use_container_width=True)
 
     # Bouton d'export CSV
     csv_data = df_filtered.to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="📥 Télécharger les alertes filtrées au format CSV",
+        label="Télécharger les alertes filtrées au format CSV",
         data=csv_data,
         file_name=f"alertes_fraude_{selected_merchant.replace(' ', '_')}.csv",
         mime="text/csv",
