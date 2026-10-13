@@ -79,6 +79,8 @@ class MLflowQualityGate:
         for c in candidates:
             if c in available_metrics:
                 return c
+        if not available_metrics:
+            return self.metric_target
         return next(iter(available_metrics.keys()))
 
     def get_active_champion_info(self) -> dict[str, Any] | None:
@@ -169,6 +171,8 @@ class MLflowQualityGate:
 
         active_run = mlflow.active_run()
         created_local_run = False
+        if params is None:
+            params = {}
         if active_run is None:
             model_type_str = (
                 params.get("model_type")
@@ -183,8 +187,6 @@ class MLflowQualityGate:
                 mlflow.set_tag("model_type", tags["model_type"])
 
         # 1. Logging des parametres, metriques et tags
-        if params is None:
-            params = {}
         if decision_threshold is not None:
             params["decision_threshold"] = str(round(float(decision_threshold), 4))
             metrics["decision_threshold"] = float(decision_threshold)
@@ -234,6 +236,10 @@ class MLflowQualityGate:
 
         # 4. Identification de la nouvelle version creee
         versions = self.client.search_model_versions(f"name='{self.model_name}'")
+        if not versions:
+            if created_local_run:
+                mlflow.end_run()
+            return False, "unknown"
         target_version = str(max(versions, key=lambda v: int(v.version)).version)
 
         # 5. Controle Qualite MLOps (Challenger vs Champion - Side-by-Side ou Historique)

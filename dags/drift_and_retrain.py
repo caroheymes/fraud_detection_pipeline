@@ -41,7 +41,11 @@ def check_drift_evidently(**context):
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     print(res.stdout)
     print(res.stderr)
-    return "trigger_hpo_and_retrain" if res.returncode == 1 else "skip_retrain"
+    if res.returncode not in (0, 2):
+        raise RuntimeError(
+            f"Échec de l'audit de drift (code de retour {res.returncode}) : {res.stderr or res.stdout}"
+        )
+    return "trigger_hpo_and_retrain" if res.returncode == 2 else "skip_retrain"
 
 
 def trigger_hpo_and_retrain():

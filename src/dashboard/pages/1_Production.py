@@ -23,12 +23,17 @@ st.title("PERFORMANCES EN PRODUCTION")
 st.markdown("---")
 
 
+@st.cache_resource
+def get_cached_postgres_engine():
+    return get_postgres_engine()
+
+
 # Utilitaires de base de données
-def query_db(query):
+def query_db(query, params=None):
     try:
-        engine = get_postgres_engine()
+        engine = get_cached_postgres_engine()
         with engine.connect() as conn:
-            df = pd.read_sql_query(query, conn)
+            df = pd.read_sql_query(query, conn, params=params)
         return df, None
     except Exception as e:
         return None, str(e)

@@ -36,4 +36,4 @@ jobs:
         env:
           PYTHONPATH: .
         run: |
-          pytest tests/test_api.py
+          pytest tests/test_api.py tests/test_threshold.py tests/test_mlflow_manager.py

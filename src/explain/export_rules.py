@@ -96,22 +96,7 @@ elif hasattr(model, "hinsage"):
     X_encoded = pd.DataFrame(X_features_arr, columns=col_names, index=df_sample.index)
 elif hasattr(model, "iso_forest"):
     # Pipeline Isolation Forest + XGBoost (Anomaly Stacking)
-    features = [
-        "category",
-        "amt",
-        "gender",
-        "distance_achat",
-        "age",
-        "city_pop",
-        "hour_sin",
-        "hour_cos",
-        "weekday_sin",
-        "weekday_cos",
-        "month_sin",
-        "month_cos",
-    ]
-    from src.utils.features import prepare_features
-
+    features = BASE_FEATURE_COLUMNS
     df_prep = prepare_features(df_sample, include_graph_ids=False)
     X_in = df_prep[[c for c in features if c in df_prep.columns]]
     X_features_arr = model.transform(X_in)
@@ -132,21 +117,9 @@ else:
         col_names = [f"feat_{i}" for i in range(X_trans.shape[1])]
         X_encoded = pd.DataFrame(X_trans, columns=col_names, index=df_sample.index)
     except Exception:
-        features = [
-            "category",
-            "amt",
-            "gender",
-            "distance_achat",
-            "age",
-            "city_pop",
-            "hour_sin",
-            "hour_cos",
-            "weekday_sin",
-            "weekday_cos",
-            "month_sin",
-            "month_cos",
-        ]
-        X_encoded = df_sample[[c for c in features if c in df_sample.columns]]
+        df_prep = prepare_features(df_sample, include_graph_ids=False)
+        features = BASE_FEATURE_COLUMNS
+        X_encoded = df_prep[[c for c in features if c in df_prep.columns]]
 
 # ==========================================================
 # 3. CALCUL SHAPASH

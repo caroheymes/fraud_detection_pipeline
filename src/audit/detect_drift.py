@@ -680,7 +680,7 @@ def main():
     )
 
     if should_retrain:
-        sys.exit(1)
+        sys.exit(2)
     else:
         sys.exit(0)
 

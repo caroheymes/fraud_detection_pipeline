@@ -112,6 +112,18 @@ def test_centralized_feature_definitions_and_sampling():
     assert df_s["is_fraud"].sum() == 5
     assert len(df_s) == 50
 
+    # Test avec jeu de données contenant 0 fraude (aucun crash, retour des données d'origine)
+    df_zero_fraud = pd.DataFrame({"amt": [10.0] * 30, "is_fraud": [0] * 30})
+    _X_zf, y_zf = get_moderate_sampled_data(
+        df_zero_fraud[["amt"]], df_zero_fraud["is_fraud"]
+    )
+    assert len(y_zf) == 30
+    assert y_zf.sum() == 0
+
+    df_zf = get_moderate_sampled_df(df_zero_fraud, label_col="is_fraud")
+    assert len(df_zf) == 30
+    assert df_zf["is_fraud"].sum() == 0
+
 
 # ============================================================================
 # 2. TESTS UNITAIRES MLFLOW QUALITY GATE
@@ -123,6 +135,7 @@ def test_mlflow_quality_gate_metric_resolution(mock_mlflow, mock_client_cls):
     gate_f2 = MLflowQualityGate(metric_target="f2")
     metrics = {"f2_class_1": 0.85, "f1_class_1": 0.75, "accuracy": 0.99}
     assert gate_f2.get_target_metric_key(metrics) == "f2_class_1"
+    assert gate_f2.get_target_metric_key({}) == "f2"
 
     gate_f1 = MLflowQualityGate(metric_target="f1")
     assert gate_f1.get_target_metric_key(metrics) == "f1_class_1"
@@ -372,3 +385,24 @@ def test_load_champion_model_success(mock_mlflow, mock_client_cls):
     assert version_id == "fraud_detector_v12"
     assert threshold == 0.35
     mock_mlflow.sklearn.load_model.assert_called_with("models:/fraud_detector@champion")
+
+
+@patch("src.utils.mlflow_manager.MlflowClient")
+@patch("src.utils.mlflow_manager.mlflow")
+def test_mlflow_quality_gate_empty_versions(mock_mlflow, mock_client_cls):
+    """Vérifie le comportement propre de log_and_evaluate lorsque aucune version n'est trouvée."""
+    mock_client = MagicMock()
+    mock_client_cls.return_value = mock_client
+    mock_client.search_model_versions.return_value = []
+    mock_mlflow.active_run.return_value = None  # Force la création d'un run local
+
+    gate = MLflowQualityGate(model_name="fraud_detector", metric_target="f2")
+    gate.client = mock_client
+
+    promoted, version = gate.log_and_evaluate(
+        model=MagicMock(),
+        metrics={"f2_class_1": 0.85},
+    )
+    assert promoted is False
+    assert version == "unknown"
+    mock_mlflow.end_run.assert_called_once()

@@ -339,6 +339,9 @@ def get_moderate_sampled_data(
     normal = train_df[train_df[label_name] == 0]
 
     n_fraud = len(fraud)
+    if n_fraud == 0:
+        return X_train_df, y_train_series
+
     n_normal_required = int(n_fraud * (1.0 / target_ratio - 1.0))
 
     if n_normal_required < len(normal):
@@ -378,6 +381,9 @@ def get_moderate_sampled_df(
     normal = df[df[target_name] == 0]
 
     n_fraud = len(fraud)
+    if n_fraud == 0:
+        return df
+
     n_normal_required = int(n_fraud * (1.0 / target_ratio - 1.0))
 
     if n_normal_required < len(normal):

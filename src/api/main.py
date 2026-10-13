@@ -21,9 +21,14 @@ import numpy as np
 import pandas as pd
 import shap
 from fastapi import BackgroundTasks, FastAPI, Header
-from pydantic import BaseModel
 from sqlalchemy import text
 
+from src.api.schemas import (
+    TransactionBatch,
+    WebhookData,
+    WebhookPayload,
+    WebhookRequest,
+)
 from src.utils.db import get_postgres_engine, get_redis_client
 from src.utils.features import (
     BASE_FEATURE_COLUMNS,
@@ -76,95 +81,7 @@ app = FastAPI(
 )
 
 
-# --- 3. DÉFINITION DES SCHÉMAS PYDANTIC & EXEMPLES ---
-class TransactionInput(BaseModel):
-    trans_date_trans_time: str
-    cc_num: int
-    merchant: str
-    category: str
-    amt: float
-    first: str
-    last: str
-    gender: str
-    street: str
-    city: str
-    state: str
-    zip: int
-    lat: float
-    long: float
-    city_pop: int
-    job: str
-    dob: str
-    trans_num: str
-    unix_time: int
-    merch_lat: float
-    merch_long: float
-    is_fraud: int
-
-
-class TransactionBatch(BaseModel):
-    transactions: list[TransactionInput]
-
-    model_config = {
-        "json_schema_extra": {
-            "examples": [
-                {
-                    "transactions": [
-                        {
-                            "trans_date_trans_time": "2020-07-22 14:05:00",
-                            "cc_num": 423578912345,
-                            "merchant": "fraud_gas_station",
-                            "category": "gas_transport",
-                            "amt": 85.50,
-                            "first": "Caro",
-                            "last": "MS",
-                            "gender": "F",
-                            "street": "12 rue de la Paix",
-                            "city": "Lyon",
-                            "state": "Rhone",
-                            "zip": 69000,
-                            "lat": 45.764043,
-                            "long": 4.835659,
-                            "city_pop": 513000,
-                            "job": "Data Ingé",
-                            "dob": "1985-04-12",
-                            "trans_num": "test_tx_001",
-                            "unix_time": 1595426700,
-                            "merch_lat": 45.768000,
-                            "merch_long": 4.840000,
-                            "is_fraud": 0,
-                        }
-                    ]
-                }
-            ]
-        }
-    }
-
-
-class WebhookData(BaseModel):
-    transaction_id: str
-    cc_num_sha256: str
-    amount: float
-    category: str
-    merchant: str
-    prediction: int
-    prediction_proba: float
-    explications_shap: dict[str, float]
-
-
-class WebhookPayload(BaseModel):
-    event: str
-    timestamp: str
-    data: WebhookData
-
-
-class WebhookResponse(BaseModel):
-    status: str
-    message: str
-
-
-class WebhookRequest(BaseModel):
-    transaction_id: str
+# --- 3. SCHÉMAS PYDANTIC IMPORTÉS DEPUIS SRC.API.SCHEMAS ---
 
 
 # Variables globales pour le modèle ML
@@ -214,6 +131,12 @@ def compute_shap_values(model_pipeline, X):
             )
         elif hasattr(model_pipeline, "classifier"):
             predictor = model_pipeline.classifier
+            X_enc = X
+            feature_names = list(X.columns)
+        elif hasattr(model_pipeline, "get_booster") or hasattr(
+            model_pipeline, "predict_proba"
+        ):
+            predictor = model_pipeline
             X_enc = X
             feature_names = list(X.columns)
         else:
@@ -564,8 +487,12 @@ def predict_batch(batch: TransactionBatch, background_tasks: BackgroundTasks):
         df["lat"], df["long"], df["merch_lat"], df["merch_long"]
     )
 
-    dob_col = pd.to_datetime(df["dob"])
-    df["age"] = df["trans_date_trans_time"].dt.year - dob_col.dt.year
+    dob_col = pd.to_datetime(df["dob"], errors="coerce")
+    df["age"] = (
+        (df["trans_date_trans_time"].dt.year - dob_col.dt.year)
+        .fillna(35)
+        .astype(int)
+    )
 
     # Hash utilisateur cryptographique HMAC-SHA256 (RGPD / PCI-DSS)
     user_hashes = compute_user_hash(df["first"], df["last"], df["dob"])
@@ -809,7 +736,11 @@ def mock_merchant_webhook(
                 shap_str = result[6]
                 if shap_str:
                     try:
-                        explications_shap = json.loads(shap_str)
+                        explications_shap = (
+                            shap_str
+                            if isinstance(shap_str, dict)
+                            else json.loads(shap_str)
+                        )
                     except Exception:
                         pass
 

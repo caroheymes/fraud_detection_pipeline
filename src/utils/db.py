@@ -31,21 +31,26 @@ def get_postgres_engine(custom_url: str | None = None, echo: bool = False) -> En
 
 
 def get_redis_client(
-    host: str | None = None, port: int = 6379, db: int = 0
+    host: str | None = None, port: int | None = None, db: int = 0
 ) -> redis.Redis | None:
     """
     Retourne une instance de client Redis connectée, ou None en cas d'indisponibilité.
     """
     redis_host = host or os.getenv("REDIS_HOST", "redis")
+    redis_port = port or int(os.getenv("REDIS_PORT", "6379"))
     try:
-        r = redis.Redis(host=redis_host, port=port, db=db, decode_responses=True)
+        r = redis.Redis(host=redis_host, port=redis_port, db=db, decode_responses=True)
         r.ping()
         return r
     except Exception:
-        # Essai de repli sur localhost
-        try:
-            r = redis.Redis(host="localhost", port=port, db=db, decode_responses=True)
-            r.ping()
-            return r
-        except Exception:
-            return None
+        # Essai de repli sur localhost (port spécifié, ou 6381 exposé dans docker-compose.yml, puis 6379)
+        for fallback_port in [redis_port, 6381, 6379]:
+            try:
+                r = redis.Redis(
+                    host="localhost", port=fallback_port, db=db, decode_responses=True
+                )
+                r.ping()
+                return r
+            except Exception:
+                pass
+        return None

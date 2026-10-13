@@ -1,5 +1,10 @@
 # tests/test_threshold.py
+import os
+import sys
+
 import numpy as np
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from src.utils.threshold import evaluate_predictions_and_curves, find_optimal_threshold
 

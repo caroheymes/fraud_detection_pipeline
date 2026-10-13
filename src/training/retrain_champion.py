@@ -79,7 +79,7 @@ def main():
 
     if "iforest" in model_type or "isolation" in model_type:
         print(
-            "\n[INFO] Lancement du reentrainement XGBoost + Isolation Forest (optimize_xgb_iforest.py)..."
+            f"\n[INFO] Lancement du reentrainement XGBoost + Isolation Forest (optimize_xgb_iforest.py, Cible: {metric_target.upper()})..."
         )
         script_path = os.path.join(script_dir, "optimize_xgb_iforest.py")
         cmd = [
@@ -89,12 +89,33 @@ def main():
             str(args.n_trials),
             "--sample-size",
             str(args.sample_size),
+            "--metric-target",
+            metric_target,
+            "--sample-position",
+            args.sample_position,
+        ]
+    elif "autoencoder" in model_type or "ae_" in model_type:
+        print(
+            f"\n[INFO] Lancement du reentrainement Auto-encodeur + XGBoost (optimize_autoencoder_xgb.py, Cible: {metric_target.upper()})..."
+        )
+        script_path = os.path.join(script_dir, "optimize_autoencoder_xgb.py")
+        cmd = [
+            sys.executable,
+            script_path,
+            "--n-trials",
+            str(args.n_trials),
+            "--sample-size",
+            str(args.sample_size),
+            "--metric-target",
+            metric_target,
+            "--sample-position",
+            args.sample_position,
         ]
     elif (
         "xgb" in model_type and "hinsage" not in model_type and "grl" not in model_type
     ):
         print(
-            "\n[INFO] Lancement du reentrainement XGBoost Tabulaire (optimize_xgb.py)..."
+            f"\n[INFO] Lancement du reentrainement XGBoost Tabulaire (optimize_xgb.py, Cible: {metric_target.upper()})..."
         )
         script_path = os.path.join(script_dir, "optimize_xgb.py")
         cmd = [
@@ -104,6 +125,10 @@ def main():
             str(args.n_trials),
             "--sample-size",
             str(args.sample_size),
+            "--metric-target",
+            metric_target,
+            "--sample-position",
+            args.sample_position,
         ]
     else:
         print(

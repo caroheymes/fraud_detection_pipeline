@@ -335,3 +335,153 @@ def test_predict_batch_inference_error():
     finally:
         api_module.model_pipeline = original_pipeline
 
+
+def test_mock_merchant_webhook_validation(monkeypatch):
+    """Vérifie le contrôle d'accès par jeton et le traitement du webhook marchand."""
+    # Test sans header de jeton -> 422 Unprocessable Entity
+    resp_no_token = client.post(
+        "/mock-merchant-webhook", json={"transaction_id": "tx_test_123"}
+    )
+    assert resp_no_token.status_code == 422
+
+    # Mock DB pour vérifier la récupération et le parsing shap_values sous forme de dict
+    class MockResult:
+        def fetchone(self):
+            return (
+                "1234567890123456",  # cc_num
+                150.0,  # amt
+                "misc_net",  # category
+                "fraud_merchant",  # merchant
+                1,  # prediction
+                0.95,  # prediction_proba
+                {"amt": 0.42, "distance_achat": 0.15},  # shap_values as dict
+                "2023-01-01 12:00:00",  # trans_date_trans_time
+            )
+
+    class MockConn:
+        def execute(self, query, params=None):
+            return MockResult()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    class MockEngine:
+        def connect(self):
+            return MockConn()
+
+    monkeypatch.setattr(api_module, "db_engine", MockEngine())
+
+    # Test avec header de jeton valide
+    headers = {"x-merchant-token": "demo-secret-key-123"}
+    resp_valid = client.post(
+        "/mock-merchant-webhook",
+        json={"transaction_id": "tx_test_123"},
+        headers=headers,
+    )
+    assert resp_valid.status_code == 200
+    data = resp_valid.json()
+    assert data["event"] == "transaction.suspecte"
+    assert data["data"]["transaction_id"] == "tx_test_123"
+    assert data["data"]["amount"] == 150.0
+    assert data["data"]["category"] == "misc_net"
+    assert data["data"]["explications_shap"] == {"amt": 0.42, "distance_achat": 0.15}
+
+
+def test_compute_shap_values_real_pipeline():
+    """Vérifie le calcul unifié des attributions locales SHAP."""
+    import pandas as pd
+    from xgboost import XGBClassifier
+
+    from src.api.main import compute_shap_values
+
+    cols = ["amt", "distance_achat"]
+    X_train = np.array([[10.0, 1.0], [500.0, 50.0], [20.0, 2.0], [800.0, 80.0]])
+    y_train = np.array([0, 1, 0, 1])
+
+    xgb = XGBClassifier(n_estimators=5, max_depth=2, random_state=42)
+    xgb.fit(X_train, y_train)
+
+    X_test_df = pd.DataFrame(X_train, columns=cols)
+    shap_results = compute_shap_values(xgb, X_test_df)
+
+    assert isinstance(shap_results, list)
+    assert len(shap_results) == 4
+    for row in shap_results:
+        assert isinstance(row, dict)
+        assert len(row) > 0
+        assert "amt" in row
+        assert "distance_achat" in row
+
+
+def test_predict_batch_malformed_dob():
+    """Vérifie la robustesse de l'inférence face à des dates de naissance invalides/malformées."""
+    payload = {
+        "transactions": [
+            {
+                "trans_date_trans_time": "2020-07-22 14:05:00",
+                "cc_num": 123456789,
+                "merchant": "valid_merchant",
+                "category": "misc_net",
+                "amt": 45.0,
+                "first": "Alice",
+                "last": "Durand",
+                "gender": "F",
+                "street": "1 rue test",
+                "city": "Paris",
+                "state": "IDF",
+                "zip": 75001,
+                "lat": 48.85,
+                "long": 2.35,
+                "city_pop": 2000000,
+                "job": "Ingénieure",
+                "dob": "not-a-valid-date-format",
+                "trans_num": "tx_malformed_dob_001",
+                "unix_time": 1595426700,
+                "merch_lat": 48.86,
+                "merch_long": 2.36,
+                "is_fraud": 0,
+            }
+        ]
+    }
+    response = client.post("/predict_batch", json=payload)
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["status"] == "success"
+    assert len(res_data["predictions"]) == 1
+    assert "prediction" in res_data["predictions"][0]
+
+
+def test_isolation_forest_xgboost_pipeline_execution():
+    """Vérifie l'entraînement et l'inférence du pipeline hybride Isolation Forest + XGBoost."""
+    import pandas as pd
+
+    from src.training.optimize_xgb_iforest import IsolationForestXGBoostPipeline
+
+    df_synth = pd.DataFrame(
+        {
+            "amt": [15.0, 25.0, 1200.0, 30.0, 950.0],
+            "category": ["grocery_pos", "gas_transport", "shopping_net", "grocery_pos", "shopping_net"],
+            "gender": ["M", "F", "F", "M", "M"],
+        }
+    )
+    y = np.array([0, 0, 1, 0, 1])
+
+    pipe = IsolationForestXGBoostPipeline(
+        n_estimators=5,
+        max_depth=2,
+        iso_estimators=10,
+        random_state=42,
+    )
+    pipe.fit(df_synth, y)
+
+    probas = pipe.predict_proba(df_synth)
+    assert probas.shape == (5, 2)
+    assert np.all((probas >= 0.0) & (probas <= 1.0))
+
+    feature_names = pipe.get_feature_names_out()
+    assert "iso_forest_anomaly_score" in feature_names
+
+

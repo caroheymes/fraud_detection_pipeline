@@ -80,6 +80,7 @@ def ingest_data_from_queue(ti):
 
         with engine.begin() as conn:
             conn.execute(text("CREATE SCHEMA IF NOT EXISTS bronze;"))
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS silver;"))
             conn.execute(
                 text("""
                 CREATE TABLE IF NOT EXISTS silver.ingested_file (
